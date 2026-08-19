@@ -306,5 +306,32 @@ P.EXAMPLES.forEach(ex => {
   ok(d && d.col === 16 && d.len === 3, 'note-target column respects indentation (got col ' + (d && d.col) + ')');
 }
 
+/* ---------- self loops (reflexive associations) ---------- */
+{
+  const res = P.compile('@startuml\nclass Personne\nPersonne "0..1" --> "*" Personne : encadre\n@enduml');
+  ok(errs(res).length === 0, 'class self-loop: no errors');
+  svgSane(res, 'class self-loop');
+  ok(res.svg.includes('encadre'), 'class self-loop: label rendered');
+  ok((res.svg.match(/<path/g) || []).length >= 1, 'class self-loop: loop path drawn');
+  ok(res.svg.includes('0..1') && res.svg.includes('*'), 'class self-loop: both multiplicities rendered');
+}
+{
+  const res = P.compile('@startuml\nobject o1\no1 --> o1 : lien\n@enduml');
+  svgSane(res, 'object self-link');
+  ok(res.svg.includes('lien'), 'object self-link: label rendered');
+  ok((res.svg.match(/<path/g) || []).length >= 1, 'object self-link: loop path drawn');
+}
+{
+  const res = P.compile('@startuml\nclass N\nN --> N : a\nN --> N : b\n@enduml');
+  svgSane(res, 'stacked self-loops');
+  ok(res.svg.includes('>a<') && res.svg.includes('>b<'), 'stacked self-loops: both labels rendered');
+  ok((res.svg.match(/<path/g) || []).length >= 2, 'stacked self-loops: two loop paths');
+}
+{
+  const res = P.compile('@startuml\n[*] --> S\nS --> S : tick\n@enduml');
+  svgSane(res, 'state self-transition (regression)');
+  ok(res.svg.includes('tick'), 'state self-transition: label still rendered');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

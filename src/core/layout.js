@@ -273,23 +273,34 @@ L.edgeSvg = function (na, nb, o) {
   var S = P.S, r = P.r;
   var out = '';
 
-  if (na === nb) {
-    /* self loop on the right side */
-    var x0 = na.x + na.w, cy = na.y + na.h / 2;
-    var y1 = Math.max(na.y + 8, cy - 14), y2 = Math.min(na.y + na.h - 8, cy + 14);
+  /* self loop: same node by reference (state/usecase) or by geometry (class/object
+     renderers may pass two rects built from the same layout position) */
+  if (na === nb || (na.x === nb.x && na.y === nb.y && na.w === nb.w && na.h === nb.h)) {
+    /* self loop on the right side; o.offset stacks several loops on one node */
+    var x0 = na.x + na.w, cy = na.y + na.h / 2 + (o.offset || 0);
+    var y1 = Math.max(na.y + 6, cy - 12), y2 = Math.min(na.y + na.h - 6, cy + 12);
     var ext = 34;
     var d = 'M' + r(x0) + ',' + r(y1) + ' h' + ext + ' q10,0 10,10 V' + r(y2 - 10) + ' q0,10 -10,10 H' + r(x0 + 3);
     out += S.path(d, { dashed: o.style === 'dashed' });
+    if (o.decoA && o.decoA !== 'none') {
+      out += S.head(o.decoA, x0 + 1, y1, Math.PI).s;
+    }
     if (o.decoB && o.decoB !== 'none') {
-      var hd = S.head(o.decoB, x0 + 1, y2, Math.PI);
-      out += hd.s;
+      out += S.head(o.decoB, x0 + 1, y2, Math.PI).s;
+    }
+    var lx0 = x0 + ext + 16, lmid = (y1 + y2) / 2 + 4;
+    if (o.stereo) {
+      out += S.text(lx0, lmid - (o.label ? 14 : 0), o.stereo, { size: 11.5, italic: true, halo: true });
     }
     if (o.label) {
       var lls = String(o.label).split(/\\n/);
       for (var li = 0; li < lls.length; li++) {
-        out += S.text(x0 + ext + 16, (y1 + y2) / 2 + li * 14 - (lls.length - 1) * 7 + 4, lls[li], { size: 12, halo: true });
+        out += S.text(lx0, lmid + li * 14 - (lls.length - 1) * 7 + (o.stereo ? 8 : 0), lls[li], { size: 12, halo: true });
       }
     }
+    /* multiplicities near each end of the loop, like on ordinary edges */
+    if (o.cardA) out += S.text(x0 + 6, y1 - 5, o.cardA, { size: 11.5, halo: true, fill: P.C.muted });
+    if (o.cardB) out += S.text(x0 + 6, y2 + 14, o.cardB, { size: 11.5, halo: true, fill: P.C.muted });
     return out;
   }
 

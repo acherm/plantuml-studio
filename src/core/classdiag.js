@@ -416,6 +416,7 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
   var specEdges = [];
   edges.forEach(function (e) {
     var c = e.cls;
+    if (e.from === e.to) return; /* self loops impose no ranking */
     if (c.constraint === 'same') specEdges.push({ from: e.from, to: e.to, constraint: 'same' });
     else if (c.aboveEnd === 'R') specEdges.push({ from: e.to, to: e.from, constraint: 'rank' });
     else specEdges.push({ from: e.from, to: e.to, constraint: 'rank' });
@@ -466,7 +467,9 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
       if (lm) { stereo = '«' + (lm[1] || lm[2]) + '»'; label = null; }
       else label = label.replace(/\s*[<>]\s*$/, '').replace(/^\s*[<>]\s*/, '');
     }
-    out += P.layout.edgeSvg(nodeRect(e.from), e.from === e.to ? nodeRect(e.from) : nodeRect(e.to), {
+    var na = nodeRect(e.from);
+    var nb = e.from === e.to ? na : nodeRect(e.to); /* same ref => edgeSvg self-loop path */
+    out += P.layout.edgeSvg(na, nb, {
       style: e.cls.style, decoA: e.cls.decoL, decoB: e.cls.decoR,
       label: label, stereo: stereo, cardA: e.cardL, cardB: e.cardR, M: M, offset: offset,
       labelT: n > 1 ? 0.32 + 0.36 * (idx / Math.max(n - 1, 1)) : 0.5
