@@ -87,7 +87,7 @@ P.parseState = function (lines, meta) {
 
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + SNAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!states.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!states.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln, parent: scope() || null };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -113,8 +113,11 @@ P.parseState = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['state', 'note', 'title', 'hide', 'end note']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event'));
+    var stWord = t.split(/\s+/)[0];
+    var sug = P.suggest(stWord, ['state', 'note', 'title', 'hide', 'end note']);
+    var dU = P.dW('error', lines[i], stWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event');
+    if (sug) dU.fix = { line: ln, find: stWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (scopeStack.length) D.push(P.d('error', states.get(scopeStack[scopeStack.length - 1]).line, "Missing '}' — composite state '" + scopeStack[scopeStack.length - 1] + "' is never closed"));

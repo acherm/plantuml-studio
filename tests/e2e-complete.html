@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>e2e: completion popup</title>
+<style>body { margin: 0; } iframe { border: 0; display: block; }</style>
+</head>
+<body>
+<iframe id="f" src="../index.html#ex=6" width="1480" height="920"></iframe>
+<script>
+/* Drives the real app: types "Car *-- Wh" and expects the completion popup to
+   offer Wheel. Screenshot-verified via headless Chrome. */
+const f = document.getElementById('f');
+f.addEventListener('load', () => {
+  const d = f.contentDocument;
+  const ta = d.getElementById('code');
+  setTimeout(() => {
+    ta.value = '@startuml\nclass Car\nclass Wheel\n\n@enduml';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }, 300);
+  setTimeout(() => {
+    const pos = ta.value.indexOf('\n@enduml');
+    ta.value = ta.value.slice(0, pos) + 'Car *-- Wh' + ta.value.slice(pos);
+    ta.focus();
+    ta.setSelectionRange(pos + 10, pos + 10);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }, 900);
+});
+</script>
+</body>
+</html>

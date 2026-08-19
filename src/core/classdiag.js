@@ -156,7 +156,7 @@ P.parseClass = function (lines, meta) {
     /* notes */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var target = m[2];
-      if (!classes.has(target)) D.push(P.d('error', ln, "note refers to '" + target + "' which is not declared (declare it before the note)"));
+      if (!classes.has(target)) D.push(P.dW('error', lines[i], target, "note refers to '" + target + "' which is not declared (declare it before the note)"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: target, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -193,7 +193,9 @@ P.parseClass = function (lines, meta) {
 
     var word = t.split(/\s+/)[0];
     var sug = P.suggest(word, KWSUGGEST);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var dU = P.dW('error', lines[i], word, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: word, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
@@ -253,7 +255,7 @@ P.parseObject = function (lines, meta) {
       continue;
     }
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!objects.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!objects.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -268,8 +270,11 @@ P.parseObject = function (lines, meta) {
       getObj(m[1], ln).fields.push(m[2].trim());
       continue;
     }
-    var sug = P.suggest(t.split(/\s+/)[0], ['object', 'map', 'note', 'title']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var oWord = t.split(/\s+/)[0];
+    var sug = P.suggest(oWord, ['object', 'map', 'note', 'title']);
+    var dO = P.dW('error', lines[i], oWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dO.fix = { line: ln, find: oWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dO);
   }
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
   if (noteBuf) D.push(P.d('error', noteBuf.line, "Missing 'end note'"));

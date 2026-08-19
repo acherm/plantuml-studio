@@ -44,8 +44,10 @@
         <div class="gutter"><div class="gutter-inner" id="gutter"></div></div>
         <div class="codewrap">
           <pre class="hl" id="hl" aria-hidden="true"></pre>
+          <div class="squig" id="squig" aria-hidden="true"></div>
           <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"
             aria-label="PlantUML source code"></textarea>
+          <div class="cpop hidden" id="cpop" role="listbox" aria-label="Completions"></div>
         </div>
       </div>
       <div class="problems" id="problems">
@@ -60,8 +62,13 @@
     <div class="divider" id="divider" role="separator" aria-orientation="vertical"></div>
 
     <section class="pane preview-pane">
+      <div class="rendersel" id="renderSel" role="tablist" aria-label="Renderer">
+        <button data-mode="studio" class="on" role="tab">Studio</button>
+        <button data-mode="plantuml" role="tab" title="Render with the official PlantUML engine (vendored beta build)">PlantUML β</button>
+      </div>
+      <div class="official-status hidden" id="status"></div>
       <div class="canvas" id="canvas">
-        <div class="viewport" id="viewport"></div>
+        <div class="viewport" id="viewport"><div id="vpStudio"></div><div id="vpOfficial" class="hidden"></div></div>
         <div class="placeholder hidden" id="placeholder">
           <div class="card">
             <strong>Nothing to draw yet.</strong><br>
@@ -98,6 +105,7 @@
       <div class="modal-body" id="modalBody"></div>
     </div>
   </div>
+  <div class="etip hidden" id="etip" role="tooltip"></div>
 </div>
 <script>
 //__CORE__

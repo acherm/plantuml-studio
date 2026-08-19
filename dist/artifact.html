@@ -28,6 +28,7 @@
   --tok-st: #7A4FA0;
   --tok-num: #3B6EA5;
   --tok-tag: #B0483F;
+  --tok-ident: #8A6A1B;
   --gutter-ink: #9AA8B5;
 }
 @media (prefers-color-scheme: dark) {
@@ -56,6 +57,7 @@
     --tok-st: #B08FD8;
     --tok-num: #7FAEE0;
     --tok-tag: #E08B80;
+    --tok-ident: #D4B45A;
     --gutter-ink: #55677A;
   }
 }
@@ -84,6 +86,7 @@
   --tok-st: #B08FD8;
   --tok-num: #7FAEE0;
   --tok-tag: #E08B80;
+  --tok-ident: #D4B45A;
   --gutter-ink: #55677A;
 }
 
@@ -276,12 +279,86 @@ select.btn { padding: 7px 8px; }
 }
 #code::selection { background: var(--accent-soft); color: transparent; }
 .tk-kw { color: var(--tok-kw); font-weight: 500; }
+.tk-id { color: var(--tok-ident); font-weight: 500; }
 .tk-str { color: var(--tok-str); }
 .tk-cm { color: var(--tok-cm); font-style: italic; }
 .tk-arrow { color: var(--tok-arrow); font-weight: 500; }
 .tk-st { color: var(--tok-st); }
 .tk-num { color: var(--tok-num); }
 .tk-tag { color: var(--tok-tag); font-weight: 500; }
+
+/* squiggles (column-precise underlines) */
+.squig {
+  position: absolute;
+  left: 0; top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.squig .sq {
+  position: absolute;
+  height: 4px;
+  background-repeat: repeat-x;
+  background-size: 7px 4px;
+}
+.squig .sq.err { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M0 3 L1.75 1 L3.5 3 L5.25 1 L7 3' fill='none' stroke='%23C4453C' stroke-width='1.1'/%3E%3C/svg%3E"); }
+.squig .sq.warn { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M0 3 L1.75 1 L3.5 3 L5.25 1 L7 3' fill='none' stroke='%23B08A28' stroke-width='1.1'/%3E%3C/svg%3E"); }
+.squig .sq.info { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M0 3 L1.75 1 L3.5 3 L5.25 1 L7 3' fill='none' stroke='%235B87C0' stroke-width='1.1'/%3E%3C/svg%3E"); }
+
+/* completion popup */
+.cpop {
+  position: absolute;
+  z-index: 60;
+  min-width: 240px;
+  max-width: 380px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+.cpop-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.cpop-item.on, .cpop-item:hover { background: var(--accent-soft); }
+.cpop-item .cl { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; }
+.cpop-item .cl.ck { color: var(--tok-kw); font-weight: 500; }
+.cpop-item .cl.ci { color: var(--tok-ident); font-weight: 500; }
+.cpop-item .cd { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+
+/* diagnostics hover tooltip */
+.etip {
+  position: fixed;
+  z-index: 90;
+  max-width: 340px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.etip-row { padding: 2px 0 2px 14px; position: relative; }
+.etip-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+}
+.etip-row.err::before { background: var(--err); }
+.etip-row.warn::before { background: var(--warn); }
+.etip-row.info::before { background: var(--info); }
 
 /* ---------------- problems ---------------- */
 .problems {
@@ -347,12 +424,69 @@ select.btn { padding: 7px 8px; }
   font: 11.5px 'IBM Plex Mono', monospace;
   min-width: 40px;
 }
+#problemsList .fixbtn {
+  margin-left: auto;
+  flex: none;
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  color: var(--accent);
+  font: 500 11px 'IBM Plex Sans', sans-serif;
+  padding: 2px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+#problemsList .fixbtn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 #problemsList .ok-row { color: var(--muted); cursor: default; font-style: italic; }
 #problemsList .ok-row:hover { background: none; }
 .problems.collapsed #problemsList { display: none; }
 
 /* ---------------- preview ---------------- */
 .preview-pane { position: relative; background: var(--paper); }
+.rendersel {
+  position: absolute;
+  top: 12px; left: 14px;
+  z-index: 30;
+  display: flex;
+  gap: 1px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.rendersel button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 500 12px 'IBM Plex Sans', sans-serif;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.rendersel button.on { background: var(--accent); color: #fff; }
+.rendersel button:not(.on):hover { background: var(--accent-soft); color: var(--accent); }
+.official-status {
+  position: absolute;
+  top: 16px; left: 190px;
+  right: 14px;
+  z-index: 30;
+  font-size: 11.5px;
+  color: #6E6E58;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.off-msg {
+  max-width: 420px;
+  margin: 90px auto;
+  background: rgba(255, 255, 252, 0.94);
+  border: 1px dashed #C9C4A8;
+  color: #6E6E58;
+  border-radius: 10px;
+  padding: 20px 26px;
+  font-size: 13px;
+  line-height: 1.7;
+}
 .canvas {
   flex: 1;
   min-height: 0;
@@ -603,8 +737,10 @@ select.btn { padding: 7px 8px; }
         <div class="gutter"><div class="gutter-inner" id="gutter"></div></div>
         <div class="codewrap">
           <pre class="hl" id="hl" aria-hidden="true"></pre>
+          <div class="squig" id="squig" aria-hidden="true"></div>
           <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"
             aria-label="PlantUML source code"></textarea>
+          <div class="cpop hidden" id="cpop" role="listbox" aria-label="Completions"></div>
         </div>
       </div>
       <div class="problems" id="problems">
@@ -619,8 +755,13 @@ select.btn { padding: 7px 8px; }
     <div class="divider" id="divider" role="separator" aria-orientation="vertical"></div>
 
     <section class="pane preview-pane">
+      <div class="rendersel" id="renderSel" role="tablist" aria-label="Renderer">
+        <button data-mode="studio" class="on" role="tab">Studio</button>
+        <button data-mode="plantuml" role="tab" title="Render with the official PlantUML engine (vendored beta build)">PlantUML β</button>
+      </div>
+      <div class="official-status hidden" id="status"></div>
       <div class="canvas" id="canvas">
-        <div class="viewport" id="viewport"></div>
+        <div class="viewport" id="viewport"><div id="vpStudio"></div><div id="vpOfficial" class="hidden"></div></div>
         <div class="placeholder hidden" id="placeholder">
           <div class="card">
             <strong>Nothing to draw yet.</strong><br>
@@ -657,6 +798,7 @@ select.btn { padding: 7px 8px; }
       <div class="modal-body" id="modalBody"></div>
     </div>
   </div>
+  <div class="etip hidden" id="etip" role="tooltip"></div>
 </div>
 <script>
 /* PlantUML Studio — core: preprocessing, diagnostics, shared parsing & SVG utils.
@@ -670,6 +812,16 @@ P.VERSION = '1.0.0';
 /* ---------------- diagnostics ---------------- */
 /* severity: 'error' | 'warning' | 'info' */
 P.d = function (severity, line, message) { return { severity: severity, line: line, message: message }; };
+
+/* diagnostic anchored to a word within a content line L = {n, text, off} */
+P.dW = function (severity, L, word, message) {
+  var d = P.d(severity, L.n, message);
+  if (word != null && L && L.text) {
+    var i = L.text.indexOf(word);
+    if (i >= 0) { d.col = (L.off || 0) + i + 1; d.len = String(word).length; }
+  }
+  return d;
+};
 
 /* ---------------- string utils ---------------- */
 P.esc = function (s) {
@@ -771,7 +923,7 @@ P.preprocess = function (text) {
     }
     var t = out.trim();
     if (t === '' || t.charAt(0) === "'") continue;
-    stripped.push({ n: i + 1, text: t });
+    stripped.push({ n: i + 1, text: t, off: (/^[ \t]*/.exec(out))[0].length });
   }
   if (inBlock) D.push(P.d('warning', rawLines.length, "Unclosed block comment /' … (missing closing '/)"));
 
@@ -854,8 +1006,16 @@ P.preprocess = function (text) {
     pushContent(L);
   }
 
-  if (lines.length && !sawStart) D.push(P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml'));
-  if (lines.length && !sawEnd) D.push(P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml'));
+  if (lines.length && !sawStart) {
+    var dS = P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml');
+    dS.fix = { insertTop: '@startuml', title: 'Insert @startuml' };
+    D.push(dS);
+  }
+  if (lines.length && !sawEnd) {
+    var dE = P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml');
+    dE.fix = { append: '@enduml', title: 'Append @enduml' };
+    D.push(dE);
+  }
 
   return { lines: lines, meta: meta, diagnostics: D };
 };
@@ -884,8 +1044,10 @@ P.detectType = function (lines, meta) {
     if (/^:[^:]+:\s/.test(t) || /\s:[^:]+:$/.test(t)) sc.usecase += 3;
     if (/^state\b/.test(t)) sc.state += 6;
     if (/\[\*\]/.test(t)) sc.state += 5;
-    /* sequence message: A -> B : text (also <- and dashed) */
-    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2}|)(?:-{1,2})(?:>{1,2}|)(?:x|o)?\s*[^\s:<>-]+\s*:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* sequence message: A -> B : text (also <-, dashed, and ++/-- activation modifiers) */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*(?:[+\-*!]{1,4}\s*)?:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* label-less message with ++/-- modifiers is uniquely sequence */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*[+\-*!]{1,4}\s*(?::|$)/.test(t)) sc.sequence += 4;
     /* class-ish arrows */
     if (/(<\|[-.]|[-.]\|>|\*[-.]|[-.]\*|\bo[-.]{2}|[-.]{2}o\b)/.test(t)) sc.class += 3;
     if (/^\S+\s*:\s*\S+\s*=/.test(t)) sc.object += 2;
@@ -1583,7 +1745,7 @@ P.parseClass = function (lines, meta) {
     /* notes */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var target = m[2];
-      if (!classes.has(target)) D.push(P.d('error', ln, "note refers to '" + target + "' which is not declared (declare it before the note)"));
+      if (!classes.has(target)) D.push(P.dW('error', lines[i], target, "note refers to '" + target + "' which is not declared (declare it before the note)"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: target, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -1620,7 +1782,9 @@ P.parseClass = function (lines, meta) {
 
     var word = t.split(/\s+/)[0];
     var sug = P.suggest(word, KWSUGGEST);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var dU = P.dW('error', lines[i], word, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: word, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
@@ -1680,7 +1844,7 @@ P.parseObject = function (lines, meta) {
       continue;
     }
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!objects.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!objects.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -1695,8 +1859,11 @@ P.parseObject = function (lines, meta) {
       getObj(m[1], ln).fields.push(m[2].trim());
       continue;
     }
-    var sug = P.suggest(t.split(/\s+/)[0], ['object', 'map', 'note', 'title']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var oWord = t.split(/\s+/)[0];
+    var sug = P.suggest(oWord, ['object', 'map', 'note', 'title']);
+    var dO = P.dW('error', lines[i], oWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dO.fix = { line: ln, find: oWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dO);
   }
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
   if (noteBuf) D.push(P.d('error', noteBuf.line, "Missing 'end note'"));
@@ -2038,14 +2205,14 @@ P.parseSequence = function (lines, meta) {
     /* notes and ref */
     if ((m = new RegExp('^[hr]?note\\s+(left|right)(?:\\s+of)?\\s+(' + PNAME + '|"[^"]+")\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = P.unquote(m[2]);
-      if (!parts.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which has not appeared yet"));
+      if (!parts.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which has not appeared yet"));
       var nb = { k: 'note', side: m[1].toLowerCase(), targets: [tgt], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) events.push(nb); else noteBuf = nb;
       continue;
     }
     if ((m = new RegExp('^[hr]?note\\s+over\\s+((?:' + PNAME + '|"[^"]+")(?:\\s*,\\s*(?:' + PNAME + '|"[^"]+"))*)\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgts = m[1].split(/\s*,\s*/).map(P.unquote);
-      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.d('error', ln, "note refers to '" + g + "' which has not appeared yet")); });
+      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.dW('error', lines[i], g, "note refers to '" + g + "' which has not appeared yet")); });
       var nb2 = { k: 'note', side: 'over', targets: tgts, text: m[2] != null ? [m[2]] : [], line: ln };
       if (m[2] != null) events.push(nb2); else noteBuf = nb2;
       continue;
@@ -2080,7 +2247,7 @@ P.parseSequence = function (lines, meta) {
     /* activate / deactivate / destroy / create */
     if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$').exec(t))) {
       var pid = P.unquote(m[2]);
-      if (!parts.has(pid)) { D.push(P.d('error', ln, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
+      if (!parts.has(pid)) { D.push(P.dW('error', lines[i], pid, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
       events.push({ k: m[1], id: pid, line: ln });
       continue;
     }
@@ -2111,8 +2278,11 @@ P.parseSequence = function (lines, meta) {
       }
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text'));
+    var sWord = t.split(/\s+/)[0];
+    var sug = P.suggest(sWord, PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
+    var dU = P.dW('error', lines[i], sWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text');
+    if (sug) dU.fix = { line: ln, find: sWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   fragStack.forEach(function (fr) {
@@ -2671,7 +2841,7 @@ P.parseUsecase = function (lines, meta) {
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + REF + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = refToId(m[2]).id;
-      if (!els.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which is not declared"));
+      if (!els.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: tgt, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -2692,8 +2862,11 @@ P.parseUsecase = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var uWord = t.split(/\s+/)[0];
+    var sug = P.suggest(uWord, ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
+    var dU = P.dW('error', lines[i], uWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: uWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (bStack.length) D.push(P.d('error', bStack[bStack.length - 1].line, "Missing '}' — rectangle '" + bStack[bStack.length - 1].label + "' is never closed"));
@@ -2926,7 +3099,7 @@ P.parseState = function (lines, meta) {
 
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + SNAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!states.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!states.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln, parent: scope() || null };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -2952,8 +3125,11 @@ P.parseState = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['state', 'note', 'title', 'hide', 'end note']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event'));
+    var stWord = t.split(/\s+/)[0];
+    var sug = P.suggest(stWord, ['state', 'note', 'title', 'hide', 'end note']);
+    var dU = P.dW('error', lines[i], stWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event');
+    if (sug) dU.fix = { line: ln, find: stWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (scopeStack.length) D.push(P.d('error', states.get(scopeStack[scopeStack.length - 1]).line, "Missing '}' — composite state '" + scopeStack[scopeStack.length - 1] + "' is never closed"));
@@ -3144,6 +3320,155 @@ P.renderState = function (model, M, meta) {
   });
 
   return { body: out, w: lay.w + 60, h: lay.h + 8 };
+};
+
+})(PUML);
+
+/* PlantUML Studio — editor services (pure, DOM-free): completion context, candidates. */
+'use strict';
+(function (P) {
+
+/* statement-starter keywords / snippets per diagram type ('*' = any type) */
+var KW = {
+  '*': [
+    { l: 'title ', d: 'diagram title' },
+    { l: '@startuml', d: 'document start' },
+    { l: '@enduml', d: 'document end' },
+    { l: 'note left of ', d: 'note (needs a target)' },
+    { l: 'note right of ', d: 'note (needs a target)' },
+    { l: 'end note', d: 'close a multi-line note' },
+    { l: 'skinparam ', d: 'accepted, not interpreted' },
+    { l: 'hide ', d: 'accepted, not interpreted' }
+  ],
+  class: [
+    { l: 'class ', d: 'declare a class' },
+    { l: 'abstract class ', d: 'abstract class' },
+    { l: 'interface ', d: 'declare an interface' },
+    { l: 'enum ', d: 'declare an enumeration' },
+    { l: 'annotation ', d: 'declare an annotation' },
+    { l: 'package ', d: 'group into a package { }' },
+    { l: 'note top of ', d: 'note above a class' },
+    { l: 'note bottom of ', d: 'note below a class' }
+  ],
+  object: [
+    { l: 'object ', d: 'declare an object' },
+    { l: 'map ', d: 'not supported (warning)' }
+  ],
+  sequence: [
+    { l: 'participant ', d: 'declare a participant' },
+    { l: 'actor ', d: 'stick-figure participant' },
+    { l: 'database ', d: 'database participant' },
+    { l: 'boundary ', d: 'participant (plain box here)' },
+    { l: 'control ', d: 'participant (plain box here)' },
+    { l: 'entity ', d: 'participant (plain box here)' },
+    { l: 'queue ', d: 'participant (plain box here)' },
+    { l: 'collections ', d: 'participant (plain box here)' },
+    { l: 'activate ', d: 'open an activation bar' },
+    { l: 'deactivate ', d: 'close an activation bar' },
+    { l: 'destroy ', d: 'end a lifeline with ✕' },
+    { l: 'return ', d: 'reply + deactivate' },
+    { l: 'autonumber', d: 'number the messages' },
+    { l: 'alt ', d: 'alternatives … else … end' },
+    { l: 'else ', d: 'next branch' },
+    { l: 'opt ', d: 'optional block … end' },
+    { l: 'loop ', d: 'loop block … end' },
+    { l: 'par ', d: 'parallel block … end' },
+    { l: 'break ', d: 'break block … end' },
+    { l: 'critical ', d: 'critical block … end' },
+    { l: 'group ', d: 'named block … end' },
+    { l: 'end', d: 'close alt/opt/loop/…' },
+    { l: 'note over ', d: 'note across lifelines' },
+    { l: 'ref over ', d: 'reference fragment' },
+    { l: 'hide footbox', d: 'no bottom participant boxes' },
+    { l: '== ', d: 'divider: == Phase ==' },
+    { l: '... ', d: 'delay: ... later ...' }
+  ],
+  usecase: [
+    { l: 'actor ', d: 'declare an actor' },
+    { l: 'usecase ', d: 'declare a use case' },
+    { l: 'rectangle ', d: 'system boundary { }' },
+    { l: 'left to right direction', d: 'layout hint' }
+  ],
+  state: [
+    { l: 'state ', d: 'declare a state' },
+    { l: '[*] --> ', d: 'initial transition' }
+  ]
+};
+
+/* Completion context at (lineText, col 0-based chars before cursor).
+   Returns {mode:'none'|'stmt'|'ident'|'any', prefix, start} — start = char index of the prefix. */
+P.completionContext = function (lineText, col) {
+  var before = String(lineText || '').slice(0, col);
+  if (((before.match(/"/g) || []).length) % 2 === 1) return { mode: 'none' };
+  /* after "… : " we are in free label/member text */
+  if (/\s:\s/.test(before) || /\s:$/.test(before)) return { mode: 'none' };
+  if (/^\s*'/.test(before)) return { mode: 'none' };
+  var m = /([A-Za-z_$@][\w.$]*)?$/.exec(before);
+  var prefix = m[1] || '';
+  var start = col - prefix.length;
+  var pre = before.slice(0, start);
+  if (/^\s*$/.test(pre)) return { mode: 'stmt', prefix: prefix, start: start };
+  if (/\b(?:of|over|from|to)\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/[-.=~]{1,2}(?:\|>|>>|>|\*|o)?\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/(?:<\||<<|<|\*|o)?[-.=~]{1,2}$/.test(pre)) return { mode: 'none' }; /* still typing the arrow */
+  if (/,\s*$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/\b(?:extends|implements|as)\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  return { mode: 'any', prefix: prefix, start: start };
+};
+
+/* Names usable as references, from a compiled model. Returns [{name, insert, d}]. */
+P.collectIdents = function (model, type) {
+  var out = [];
+  if (!model) return out;
+  function push(name, insert, d) {
+    if (!name || name.charAt(0) === '@') return;
+    out.push({ name: name, insert: insert || name, d: d || '' });
+  }
+  if (type === 'class' && model.classes) {
+    model.classes.forEach(function (c) { push(c.id, c.id, c.kind); });
+  } else if (type === 'object' && model.objects) {
+    model.objects.forEach(function (o) { push(o.id, o.id, 'object'); });
+  } else if (type === 'sequence' && model.parts) {
+    model.parts.forEach(function (p) { push(p.id, /[^\w.$@]/.test(p.id) ? '"' + p.id + '"' : p.id, p.kind); });
+  } else if (type === 'usecase' && model.els) {
+    model.els.forEach(function (e) {
+      var ins = e.id;
+      if (/[^\w.$]/.test(e.id)) ins = e.kind === 'actor' ? ':' + e.id + ':' : '(' + e.id + ')';
+      push(e.id, ins, e.kind);
+    });
+  } else if (type === 'state' && model.states) {
+    model.states.forEach(function (s) {
+      if (s.kind === 'initial' || s.kind === 'final') return;
+      push(s.id, /[^\w.$]/.test(s.id) ? '"' + s.id + '"' : s.id, s.kind);
+    });
+  }
+  return out;
+};
+
+/* Ranked candidates for a context. Returns [{label, insert, kind, d}] (max 12). */
+P.completionsFor = function (ctx, type, idents) {
+  if (!ctx || ctx.mode === 'none') return [];
+  var pfx = (ctx.prefix || '').toLowerCase();
+  var out = [], seen = new Set();
+  function add(label, insert, kind, d) {
+    if (seen.has(label)) return;
+    if (pfx && label.toLowerCase().indexOf(pfx) !== 0) return;
+    if (label.toLowerCase() === pfx && insert === ctx.prefix) return; /* nothing to add */
+    seen.add(label);
+    out.push({ label: label, insert: insert, kind: kind, d: d || '' });
+  }
+  var kws = (KW[type] || []).concat(KW['*']);
+  var ids = idents || [];
+  if (ctx.mode === 'ident') {
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+  } else if (ctx.mode === 'stmt') {
+    kws.forEach(function (k) { add(k.l.trim(), k.l, 'kw', k.d); });
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+  } else {
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+    kws.forEach(function (k) { add(k.l.trim(), k.l, 'kw', k.d); });
+  }
+  return out.slice(0, 12);
 };
 
 })(PUML);
@@ -3523,6 +3848,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PUML;
 var $ = function (id) { return document.getElementById(id); };
 var elCode = $('code'), elHl = $('hl'), elGutter = $('gutter');
 var elViewport = $('viewport'), elCanvas = $('canvas'), elPlaceholder = $('placeholder');
+var elVpStudio = $('vpStudio'), elVpOfficial = $('vpOfficial');
+var elSquig = $('squig'), elCpop = $('cpop'), elEtip = $('etip'), elOffStatus = $('status');
+var EDT_LH = 20.8, EDT_PT = 10, EDT_PL = 14; /* editor line-height & padding (must match CSS) */
 var elProblems = $('problems'), elProblemsList = $('problemsList'), elProblemsCnt = $('problemsCnt');
 var elPill = $('statusPill'), elCounts = $('statusCounts'), elType = $('statusType'), elPos = $('statusPos');
 var elErrBadge = $('errBadge');
@@ -3574,17 +3902,26 @@ function hlLine(line) {
   var out = '', last = 0, m;
   HL_RE.lastIndex = 0;
   while ((m = HL_RE.exec(line))) {
-    if (m.index > last) out += esc(line.slice(last, m.index));
+    if (m.index > last) out += plainSeg(line.slice(last, m.index));
     var cls = m[1] ? 'tk-cm' : m[2] ? 'tk-str' : m[3] ? 'tk-st' : m[4] ? 'tk-tag' : m[5] ? 'tk-kw' : m[6] ? 'tk-arrow' : 'tk-num';
     out += '<span class="' + cls + '">' + esc(m[0]) + '</span>';
     last = m.index + m[0].length;
     if (m[0].length === 0) HL_RE.lastIndex++;
   }
-  out += esc(line.slice(last));
+  out += plainSeg(line.slice(last));
   return out;
 }
 
 var lineSev = new Map();
+var lineDiags = new Map();
+var identSet = new Set(), identList = [];
+function plainSeg(seg) {
+  var e = esc(seg);
+  if (!identSet.size) return e;
+  return e.replace(/[A-Za-z_$][\w.$]*/g, function (w) {
+    return identSet.has(w) ? '<span class="tk-id">' + w + '</span>' : w;
+  });
+}
 function renderHighlight() {
   var lines = elCode.value.split('\n');
   var html = '';
@@ -3598,18 +3935,35 @@ function renderHighlight() {
   for (i = 0; i < lines.length; i++) {
     var sev2 = lineSev.get(i + 1);
     var gc = sev2 === 'error' ? ' err' : sev2 === 'warning' ? ' warn' : sev2 === 'info' ? ' info' : '';
-    g += '<div class="gl' + gc + '">' + (sev2 ? '<span class="dot"></span>' : '') + (i + 1) + '</div>';
+    var ds0 = lineDiags.get(i + 1);
+    var ttl = ds0 ? ' title="' + esc(ds0.map(function (d) { return d.message; }).join('\n')) + '"' : '';
+    g += '<div class="gl' + gc + '"' + ttl + '>' + (sev2 ? '<span class="dot"></span>' : '') + (i + 1) + '</div>';
   }
   elGutter.innerHTML = g;
+
+  /* column-precise squiggles */
+  var charW = measure('0', 13, { mono: true });
+  var sq = '';
+  lineDiags.forEach(function (ds, lnum) {
+    ds.forEach(function (d) {
+      if (!d.col) return;
+      var cls = d.severity === 'error' ? 'err' : d.severity === 'warning' ? 'warn' : 'info';
+      sq += '<i class="sq ' + cls + '" style="left:' + P_round(EDT_PL + (d.col - 1) * charW) +
+        'px;top:' + P_round((lnum - 1) * EDT_LH + EDT_PT + 16.5) + 'px;width:' + P_round(Math.max(d.len || 1, 1) * charW) + 'px"></i>';
+    });
+  });
+  elSquig.innerHTML = sq;
   syncScroll();
 }
+function P_round(v) { return Math.round(v * 10) / 10; }
 
 function syncScroll() {
   elHl.scrollTop = elCode.scrollTop;
   elHl.scrollLeft = elCode.scrollLeft;
   elGutter.style.transform = 'translateY(' + (-elCode.scrollTop) + 'px)';
+  elSquig.style.transform = 'translate(' + (-elCode.scrollLeft) + 'px,' + (-elCode.scrollTop) + 'px)';
 }
-elCode.addEventListener('scroll', syncScroll);
+elCode.addEventListener('scroll', function () { syncScroll(); hideCpop(); hideEtip(); });
 
 /* ---------------- compile ---------------- */
 var compileTimer = null, lastResult = null;
@@ -3627,18 +3981,26 @@ function compileNow() {
   lastResult = res;
 
   lineSev.clear();
+  lineDiags.clear();
   var counts = { error: 0, warning: 0, info: 0 };
   res.diagnostics.forEach(function (d) {
     counts[d.severity]++;
+    if (d.line) {
+      if (!lineDiags.has(d.line)) lineDiags.set(d.line, []);
+      lineDiags.get(d.line).push(d);
+    }
     var prev = lineSev.get(d.line);
     var rank = { error: 0, warning: 1, info: 2 };
     if (!prev || rank[d.severity] < rank[prev]) lineSev.set(d.line, d.severity);
   });
+  identList = PUML.collectIdents(res.model, res.type);
+  identSet = new Set(identList.map(function (x) { return x.name; }));
 
   renderHighlight();
   renderProblems(res, counts);
   renderStatus(res, counts);
   renderPreview(res, counts);
+  if (renderMode === 'plantuml') scheduleOfficial();
   try { localStorage.setItem(LS_DOC, text); localStorage.setItem(LS_TYPE, type); } catch (e) {}
 }
 
@@ -3660,6 +4022,16 @@ function renderProblems(res, counts) {
       var msg = document.createElement('span');
       msg.textContent = d.message;
       li2.appendChild(sev); li2.appendChild(ln); li2.appendChild(msg);
+      if (d.fix) {
+        var fb = document.createElement('button');
+        fb.className = 'fixbtn';
+        fb.textContent = 'Fix';
+        fb.title = d.fix.title || 'Apply the suggested fix';
+        (function (fix) {
+          fb.addEventListener('click', function (ev) { ev.stopPropagation(); applyFix(fix); });
+        })(d.fix);
+        li2.appendChild(fb);
+      }
       if (d.line) li2.addEventListener('click', function () { gotoLine(d.line); });
       elProblemsList.appendChild(li2);
     });
@@ -3694,7 +4066,7 @@ function renderStatus(res, counts) {
 
 function renderPreview(res, counts) {
   if (res.svg) {
-    elViewport.innerHTML = res.svg;
+    elVpStudio.innerHTML = res.svg;
     elPlaceholder.classList.add('hidden');
     elCanvas.classList.toggle('invalid', counts.error > 0);
     if (counts.error > 0) {
@@ -3703,10 +4075,10 @@ function renderPreview(res, counts) {
     } else {
       elErrBadge.classList.add('hidden');
     }
-    if (!view.touched) fit();
+    if (!view.touched && renderMode === 'studio') fit();
   } else {
-    elViewport.innerHTML = '';
-    elPlaceholder.classList.remove('hidden');
+    elVpStudio.innerHTML = '';
+    if (renderMode === 'studio') elPlaceholder.classList.remove('hidden');
     elErrBadge.classList.add('hidden');
     elCanvas.classList.remove('invalid');
   }
@@ -3716,10 +4088,16 @@ function renderPreview(res, counts) {
 function applyView() {
   elViewport.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.zoom + ')';
 }
+function activeSize() {
+  if (renderMode === 'plantuml' && officialSize) return officialSize;
+  if (lastResult && lastResult.svg) return { w: lastResult.width, h: lastResult.height };
+  return null;
+}
 function fit() {
-  if (!lastResult || !lastResult.svg) return;
+  var sz = activeSize();
+  if (!sz) return;
   var cw = elCanvas.clientWidth, ch = elCanvas.clientHeight;
-  var w = lastResult.width, h = lastResult.height;
+  var w = sz.w, h = sz.h;
   if (!w || !h || !cw || !ch) return;
   var z = Math.min((cw - 48) / w, (ch - 48) / h, 1.6);
   z = Math.max(z, 0.05);
@@ -3767,16 +4145,25 @@ $('zIn').addEventListener('click', function () { zoomAt(elCanvas.clientWidth / 2
 $('zOut').addEventListener('click', function () { zoomAt(elCanvas.clientWidth / 2, elCanvas.clientHeight / 2, 0.8); });
 $('zFit').addEventListener('click', function () { view.touched = false; fit(); });
 $('z100').addEventListener('click', function () {
+  var sz = activeSize();
   view.zoom = 1; view.touched = true;
-  view.x = Math.max(24, (elCanvas.clientWidth - (lastResult ? lastResult.width : 0)) / 2);
+  view.x = Math.max(24, (elCanvas.clientWidth - (sz ? sz.w : 0)) / 2);
   view.y = 24;
   applyView();
 });
 window.addEventListener('resize', function () { if (!view.touched) fit(); });
 
 /* ---------------- editor behaviour ---------------- */
-elCode.addEventListener('input', function () { renderHighlight(); schedule(); updatePos(); });
+elCode.addEventListener('input', function () { renderHighlight(); schedule(); updatePos(); maybeComplete(false); });
 elCode.addEventListener('keydown', function (e) {
+  if (cpopOpen()) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); cpopMove(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); cpopMove(-1); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); cpopAccept(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); hideCpop(); return; }
+  }
+  if (e.key === ' ' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); maybeComplete(true); return; }
+  hideEtip();
   if (e.key === 'Tab') {
     e.preventDefault();
     var s = elCode.selectionStart, en = elCode.selectionEnd;
@@ -3784,6 +4171,8 @@ elCode.addEventListener('keydown', function (e) {
     renderHighlight(); schedule();
   }
 });
+elCode.addEventListener('blur', function () { setTimeout(hideCpop, 150); });
+elCode.addEventListener('click', function () { hideCpop(); });
 ['keyup', 'click', 'select'].forEach(function (ev) { elCode.addEventListener(ev, updatePos); });
 function updatePos() {
   var s = elCode.value.slice(0, elCode.selectionStart);
@@ -3970,7 +4359,193 @@ $('btnHelp').addEventListener('click', function () {
 $('modalClose').addEventListener('click', function () { modal.classList.add('hidden'); });
 modal.addEventListener('click', function (e) { if (e.target === modal) modal.classList.add('hidden'); });
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') { modal.classList.add('hidden'); menu.classList.add('hidden'); }
+  if (e.key === 'Escape') { modal.classList.add('hidden'); menu.classList.add('hidden'); hideCpop(); hideEtip(); }
+});
+
+/* ---------------- quick fixes ---------------- */
+function applyFix(fix) {
+  var lines = elCode.value.split('\n');
+  if (fix.insertTop) lines.unshift(fix.insertTop);
+  else if (fix.append) lines.push(fix.append);
+  else if (fix.line && fix.find != null) {
+    var idx = fix.line - 1;
+    if (idx >= 0 && idx < lines.length) lines[idx] = lines[idx].replace(fix.find, fix.replace);
+  }
+  elCode.value = lines.join('\n');
+  compileNow();
+  elCode.focus();
+  toast('Fixed');
+}
+
+/* ---------------- completion popup ---------------- */
+var cpopItems = [], cpopIdx = 0, cpopCtx = null, cpopLineStart = 0;
+function cpopOpen() { return !elCpop.classList.contains('hidden'); }
+function hideCpop() { elCpop.classList.add('hidden'); }
+function maybeComplete(force) {
+  if (elCode.selectionStart !== elCode.selectionEnd) { hideCpop(); return; }
+  var pos = elCode.selectionStart;
+  var upto = elCode.value.slice(0, pos);
+  var lineStart = upto.lastIndexOf('\n') + 1;
+  var lineEnd = elCode.value.indexOf('\n', lineStart);
+  if (lineEnd === -1) lineEnd = elCode.value.length;
+  var lineText = elCode.value.slice(lineStart, lineEnd);
+  var col = pos - lineStart;
+  var type = lastResult && lastResult.type ? lastResult.type : 'class';
+  var ctx = PUML.completionContext(lineText, col);
+  if (ctx.mode === 'none' || (!force && (ctx.prefix || '').length < 2)) { hideCpop(); return; }
+  var items = PUML.completionsFor(ctx, type, identList);
+  if (!items.length) { hideCpop(); return; }
+  cpopItems = items; cpopIdx = 0; cpopCtx = ctx; cpopLineStart = lineStart;
+  var lineNo = (upto.match(/\n/g) || []).length;
+  var charW = measure('0', 13, { mono: true });
+  elCpop.style.left = Math.max(4, EDT_PL + ctx.start * charW - elCode.scrollLeft) + 'px';
+  elCpop.style.top = (lineNo * EDT_LH + EDT_PT - elCode.scrollTop + EDT_LH + 3) + 'px';
+  renderCpop();
+  elCpop.classList.remove('hidden');
+}
+function renderCpop() {
+  elCpop.innerHTML = '';
+  cpopItems.forEach(function (it, i) {
+    var d = document.createElement('div');
+    d.className = 'cpop-item' + (i === cpopIdx ? ' on' : '');
+    var l = document.createElement('span');
+    l.className = 'cl ' + (it.kind === 'ident' ? 'ci' : 'ck');
+    l.textContent = it.label;
+    var dd = document.createElement('span');
+    dd.className = 'cd';
+    dd.textContent = it.d;
+    d.appendChild(l); d.appendChild(dd);
+    d.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    d.addEventListener('click', function () { cpopIdx = i; cpopAccept(); });
+    elCpop.appendChild(d);
+  });
+}
+function cpopMove(dir) { cpopIdx = (cpopIdx + dir + cpopItems.length) % cpopItems.length; renderCpop(); }
+function cpopAccept() {
+  var it = cpopItems[cpopIdx];
+  if (!it || !cpopCtx) { hideCpop(); return; }
+  var from = cpopLineStart + cpopCtx.start;
+  elCode.setRangeText(it.insert, from, elCode.selectionStart, 'end');
+  hideCpop();
+  renderHighlight(); schedule(); updatePos();
+}
+
+/* ---------------- diagnostics hover ---------------- */
+var etipTimer = null, etipLine = 0;
+function hideEtip() { clearTimeout(etipTimer); etipTimer = null; etipLine = 0; elEtip.classList.add('hidden'); }
+elCode.addEventListener('mousemove', function (e) {
+  var line = Math.floor((e.offsetY + elCode.scrollTop - EDT_PT) / EDT_LH) + 1;
+  var ds = lineDiags.get(line);
+  if (!ds || !ds.length) { hideEtip(); return; }
+  if (line === etipLine && !elEtip.classList.contains('hidden')) return;
+  clearTimeout(etipTimer);
+  etipTimer = setTimeout(function () {
+    etipLine = line;
+    elEtip.innerHTML = '';
+    ds.slice(0, 4).forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'etip-row ' + (d.severity === 'error' ? 'err' : d.severity === 'warning' ? 'warn' : 'info');
+      row.textContent = d.message;
+      elEtip.appendChild(row);
+    });
+    elEtip.style.left = Math.min(e.clientX + 14, window.innerWidth - 360) + 'px';
+    elEtip.style.top = Math.min(e.clientY + 16, window.innerHeight - 120) + 'px';
+    elEtip.classList.remove('hidden');
+  }, 140);
+});
+elCode.addEventListener('mouseleave', hideEtip);
+
+/* ---------------- official PlantUML renderer (vendored js-plantuml, beta) ---------------- */
+var renderMode = 'studio';
+var officialSize = null, officialLoadPromise = null, officialTimer = null, officialSeq = 0;
+
+function setOffStatus(msg) { elOffStatus.textContent = msg; }
+
+function loadOfficial() {
+  if (officialLoadPromise) return officialLoadPromise;
+  officialLoadPromise = new Promise(function (resolve, reject) {
+    if (location.protocol === 'file:') {
+      reject(new Error('The official engine cannot load from file:// — serve this folder over HTTP (e.g. python3 -m http.server) or use the hosted version.'));
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = 'vendor/viz-global.js';
+    s.onload = function () {
+      import(new URL('vendor/plantuml.js', location.href).href).then(resolve, function () {
+        reject(new Error('Could not load vendor/plantuml.js'));
+      });
+    };
+    s.onerror = function () {
+      reject(new Error('The official engine files (vendor/) are not available here — use the hosted version at blog.mathieuacher.com/plantuml-studio.'));
+    };
+    document.head.appendChild(s);
+  });
+  officialLoadPromise['catch'](function () { /* allow retry after failures on next switch */
+    officialLoadPromise = null;
+  });
+  return officialLoadPromise;
+}
+
+function scheduleOfficial() {
+  clearTimeout(officialTimer);
+  officialTimer = setTimeout(updateOfficial, 350);
+}
+
+function officialMessage(html) {
+  elVpOfficial.innerHTML = '<div class="off-msg">' + html + '</div>';
+  officialSize = null;
+}
+
+function updateOfficial() {
+  if (renderMode !== 'plantuml') return;
+  var seq = ++officialSeq;
+  var linesArr = elCode.value.split(/\r\n|\r|\n/);
+  setOffStatus('Rendering with the official PlantUML engine…');
+  loadOfficial().then(function (mod) {
+    if (seq !== officialSeq) return;
+    elVpOfficial.innerHTML = '';
+    try { mod.render(linesArr, 'vpOfficial'); }
+    catch (e2) { setOffStatus('Official render failed: ' + (e2 && e2.message || e2)); return; }
+    waitOfficialSvg(seq, 0);
+  }, function (err) {
+    setOffStatus('Official engine unavailable');
+    officialMessage(esc(err && err.message || 'Official engine unavailable'));
+  });
+}
+function waitOfficialSvg(seq, tries) {
+  if (seq !== officialSeq) return;
+  if (elVpOfficial.querySelector('svg')) { finalizeOfficial(); return; }
+  if (tries > 80) { setOffStatus('Official engine produced no output'); return; }
+  setTimeout(function () { waitOfficialSvg(seq, tries + 1); }, 120);
+}
+function finalizeOfficial() {
+  var svg = elVpOfficial.querySelector('svg');
+  if (!svg) { setOffStatus('Official engine produced no output'); return; }
+  var w = parseFloat(svg.getAttribute('width')) || 0;
+  var h = parseFloat(svg.getAttribute('height')) || 0;
+  if ((!w || !h) && svg.viewBox && svg.viewBox.baseVal) { w = svg.viewBox.baseVal.width; h = svg.viewBox.baseVal.height; }
+  officialSize = { w: w || 600, h: h || 400 };
+  setOffStatus('Official PlantUML engine (beta, vendored js-plantuml build) — diagnostics still come from Studio');
+  if (!view.touched) fit();
+}
+function setRenderMode(m) {
+  renderMode = m;
+  Array.prototype.forEach.call($('renderSel').querySelectorAll('button'), function (b) {
+    b.classList.toggle('on', b.getAttribute('data-mode') === m);
+  });
+  elVpStudio.classList.toggle('hidden', m !== 'studio');
+  elVpOfficial.classList.toggle('hidden', m !== 'plantuml');
+  elOffStatus.classList.toggle('hidden', m !== 'plantuml');
+  view.touched = false;
+  if (m === 'plantuml') { elPlaceholder.classList.add('hidden'); updateOfficial(); }
+  else {
+    if (lastResult && !lastResult.svg) elPlaceholder.classList.remove('hidden');
+    fit();
+  }
+}
+$('renderSel').addEventListener('click', function (e) {
+  var b = e.target.closest ? e.target.closest('button') : null;
+  if (b) setRenderMode(b.getAttribute('data-mode'));
 });
 
 /* ---------------- split divider ---------------- */
@@ -4007,11 +4582,16 @@ divider.addEventListener('pointermove', function (e) {
     }
   } catch (e) {}
 
+  var wantOfficial = /official/.test(location.hash || '');
   var hashEx = /[#&]ex=([^&]+)/.exec(location.hash || '');
   if (hashEx) {
     var key = decodeURIComponent(hashEx[1]);
     var idx = /^\d+$/.test(key) ? +key : PUML.EXAMPLES.findIndex(function (x) { return x.name.toLowerCase().indexOf(key.toLowerCase()) >= 0; });
-    if (PUML.EXAMPLES[idx]) { loadExample(idx); return; }
+    if (PUML.EXAMPLES[idx]) {
+      loadExample(idx);
+      if (wantOfficial) setRenderMode('plantuml');
+      return;
+    }
   }
   var saved = null, savedType = 'auto';
   try {
@@ -4025,6 +4605,7 @@ divider.addEventListener('pointermove', function (e) {
   } else {
     loadExample(0);
   }
+  if (wantOfficial) setRenderMode('plantuml');
 })();
 
 })();

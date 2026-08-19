@@ -10,6 +10,16 @@ P.VERSION = '1.0.0';
 /* severity: 'error' | 'warning' | 'info' */
 P.d = function (severity, line, message) { return { severity: severity, line: line, message: message }; };
 
+/* diagnostic anchored to a word within a content line L = {n, text, off} */
+P.dW = function (severity, L, word, message) {
+  var d = P.d(severity, L.n, message);
+  if (word != null && L && L.text) {
+    var i = L.text.indexOf(word);
+    if (i >= 0) { d.col = (L.off || 0) + i + 1; d.len = String(word).length; }
+  }
+  return d;
+};
+
 /* ---------------- string utils ---------------- */
 P.esc = function (s) {
   return String(s == null ? '' : s)
@@ -110,7 +120,7 @@ P.preprocess = function (text) {
     }
     var t = out.trim();
     if (t === '' || t.charAt(0) === "'") continue;
-    stripped.push({ n: i + 1, text: t });
+    stripped.push({ n: i + 1, text: t, off: (/^[ \t]*/.exec(out))[0].length });
   }
   if (inBlock) D.push(P.d('warning', rawLines.length, "Unclosed block comment /' … (missing closing '/)"));
 
@@ -193,8 +203,16 @@ P.preprocess = function (text) {
     pushContent(L);
   }
 
-  if (lines.length && !sawStart) D.push(P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml'));
-  if (lines.length && !sawEnd) D.push(P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml'));
+  if (lines.length && !sawStart) {
+    var dS = P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml');
+    dS.fix = { insertTop: '@startuml', title: 'Insert @startuml' };
+    D.push(dS);
+  }
+  if (lines.length && !sawEnd) {
+    var dE = P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml');
+    dE.fix = { append: '@enduml', title: 'Append @enduml' };
+    D.push(dE);
+  }
 
   return { lines: lines, meta: meta, diagnostics: D };
 };
@@ -223,8 +241,10 @@ P.detectType = function (lines, meta) {
     if (/^:[^:]+:\s/.test(t) || /\s:[^:]+:$/.test(t)) sc.usecase += 3;
     if (/^state\b/.test(t)) sc.state += 6;
     if (/\[\*\]/.test(t)) sc.state += 5;
-    /* sequence message: A -> B : text (also <- and dashed) */
-    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2}|)(?:-{1,2})(?:>{1,2}|)(?:x|o)?\s*[^\s:<>-]+\s*:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* sequence message: A -> B : text (also <-, dashed, and ++/-- activation modifiers) */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*(?:[+\-*!]{1,4}\s*)?:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* label-less message with ++/-- modifiers is uniquely sequence */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*[+\-*!]{1,4}\s*(?::|$)/.test(t)) sc.sequence += 4;
     /* class-ish arrows */
     if (/(<\|[-.]|[-.]\|>|\*[-.]|[-.]\*|\bo[-.]{2}|[-.]{2}o\b)/.test(t)) sc.class += 3;
     if (/^\S+\s*:\s*\S+\s*=/.test(t)) sc.object += 2;

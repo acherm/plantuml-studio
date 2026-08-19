@@ -10,6 +10,16 @@ P.VERSION = '1.0.0';
 /* severity: 'error' | 'warning' | 'info' */
 P.d = function (severity, line, message) { return { severity: severity, line: line, message: message }; };
 
+/* diagnostic anchored to a word within a content line L = {n, text, off} */
+P.dW = function (severity, L, word, message) {
+  var d = P.d(severity, L.n, message);
+  if (word != null && L && L.text) {
+    var i = L.text.indexOf(word);
+    if (i >= 0) { d.col = (L.off || 0) + i + 1; d.len = String(word).length; }
+  }
+  return d;
+};
+
 /* ---------------- string utils ---------------- */
 P.esc = function (s) {
   return String(s == null ? '' : s)
@@ -110,7 +120,7 @@ P.preprocess = function (text) {
     }
     var t = out.trim();
     if (t === '' || t.charAt(0) === "'") continue;
-    stripped.push({ n: i + 1, text: t });
+    stripped.push({ n: i + 1, text: t, off: (/^[ \t]*/.exec(out))[0].length });
   }
   if (inBlock) D.push(P.d('warning', rawLines.length, "Unclosed block comment /' … (missing closing '/)"));
 
@@ -193,8 +203,16 @@ P.preprocess = function (text) {
     pushContent(L);
   }
 
-  if (lines.length && !sawStart) D.push(P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml'));
-  if (lines.length && !sawEnd) D.push(P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml'));
+  if (lines.length && !sawStart) {
+    var dS = P.d('warning', lines[0].n, 'Missing @startuml — PlantUML requires the document to start with @startuml');
+    dS.fix = { insertTop: '@startuml', title: 'Insert @startuml' };
+    D.push(dS);
+  }
+  if (lines.length && !sawEnd) {
+    var dE = P.d('warning', lines[lines.length - 1].n, 'Missing @enduml — PlantUML requires the document to end with @enduml');
+    dE.fix = { append: '@enduml', title: 'Append @enduml' };
+    D.push(dE);
+  }
 
   return { lines: lines, meta: meta, diagnostics: D };
 };
@@ -223,8 +241,10 @@ P.detectType = function (lines, meta) {
     if (/^:[^:]+:\s/.test(t) || /\s:[^:]+:$/.test(t)) sc.usecase += 3;
     if (/^state\b/.test(t)) sc.state += 6;
     if (/\[\*\]/.test(t)) sc.state += 5;
-    /* sequence message: A -> B : text (also <- and dashed) */
-    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2}|)(?:-{1,2})(?:>{1,2}|)(?:x|o)?\s*[^\s:<>-]+\s*:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* sequence message: A -> B : text (also <-, dashed, and ++/-- activation modifiers) */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*(?:[+\-*!]{1,4}\s*)?:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
+    /* label-less message with ++/-- modifiers is uniquely sequence */
+    if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*[+\-*!]{1,4}\s*(?::|$)/.test(t)) sc.sequence += 4;
     /* class-ish arrows */
     if (/(<\|[-.]|[-.]\|>|\*[-.]|[-.]\*|\bo[-.]{2}|[-.]{2}o\b)/.test(t)) sc.class += 3;
     if (/^\S+\s*:\s*\S+\s*=/.test(t)) sc.object += 2;
@@ -922,7 +942,7 @@ P.parseClass = function (lines, meta) {
     /* notes */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var target = m[2];
-      if (!classes.has(target)) D.push(P.d('error', ln, "note refers to '" + target + "' which is not declared (declare it before the note)"));
+      if (!classes.has(target)) D.push(P.dW('error', lines[i], target, "note refers to '" + target + "' which is not declared (declare it before the note)"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: target, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -959,7 +979,9 @@ P.parseClass = function (lines, meta) {
 
     var word = t.split(/\s+/)[0];
     var sug = P.suggest(word, KWSUGGEST);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var dU = P.dW('error', lines[i], word, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: word, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
@@ -1019,7 +1041,7 @@ P.parseObject = function (lines, meta) {
       continue;
     }
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + NAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!objects.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!objects.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -1034,8 +1056,11 @@ P.parseObject = function (lines, meta) {
       getObj(m[1], ln).fields.push(m[2].trim());
       continue;
     }
-    var sug = P.suggest(t.split(/\s+/)[0], ['object', 'map', 'note', 'title']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var oWord = t.split(/\s+/)[0];
+    var sug = P.suggest(oWord, ['object', 'map', 'note', 'title']);
+    var dO = P.dW('error', lines[i], oWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dO.fix = { line: ln, find: oWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dO);
   }
   if (cur) D.push(P.d('error', curOpenLine, "Missing '}' — the block of '" + cur.id + "' is never closed"));
   if (noteBuf) D.push(P.d('error', noteBuf.line, "Missing 'end note'"));
@@ -1377,14 +1402,14 @@ P.parseSequence = function (lines, meta) {
     /* notes and ref */
     if ((m = new RegExp('^[hr]?note\\s+(left|right)(?:\\s+of)?\\s+(' + PNAME + '|"[^"]+")\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = P.unquote(m[2]);
-      if (!parts.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which has not appeared yet"));
+      if (!parts.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which has not appeared yet"));
       var nb = { k: 'note', side: m[1].toLowerCase(), targets: [tgt], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) events.push(nb); else noteBuf = nb;
       continue;
     }
     if ((m = new RegExp('^[hr]?note\\s+over\\s+((?:' + PNAME + '|"[^"]+")(?:\\s*,\\s*(?:' + PNAME + '|"[^"]+"))*)\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgts = m[1].split(/\s*,\s*/).map(P.unquote);
-      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.d('error', ln, "note refers to '" + g + "' which has not appeared yet")); });
+      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.dW('error', lines[i], g, "note refers to '" + g + "' which has not appeared yet")); });
       var nb2 = { k: 'note', side: 'over', targets: tgts, text: m[2] != null ? [m[2]] : [], line: ln };
       if (m[2] != null) events.push(nb2); else noteBuf = nb2;
       continue;
@@ -1419,7 +1444,7 @@ P.parseSequence = function (lines, meta) {
     /* activate / deactivate / destroy / create */
     if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$').exec(t))) {
       var pid = P.unquote(m[2]);
-      if (!parts.has(pid)) { D.push(P.d('error', ln, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
+      if (!parts.has(pid)) { D.push(P.dW('error', lines[i], pid, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
       events.push({ k: m[1], id: pid, line: ln });
       continue;
     }
@@ -1450,8 +1475,11 @@ P.parseSequence = function (lines, meta) {
       }
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text'));
+    var sWord = t.split(/\s+/)[0];
+    var sug = P.suggest(sWord, PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
+    var dU = P.dW('error', lines[i], sWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text');
+    if (sug) dU.fix = { line: ln, find: sWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   fragStack.forEach(function (fr) {
@@ -2010,7 +2038,7 @@ P.parseUsecase = function (lines, meta) {
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + REF + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = refToId(m[2]).id;
-      if (!els.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which is not declared"));
+      if (!els.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: tgt, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -2031,8 +2059,11 @@ P.parseUsecase = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var uWord = t.split(/\s+/)[0];
+    var sug = P.suggest(uWord, ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
+    var dU = P.dW('error', lines[i], uWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: uWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (bStack.length) D.push(P.d('error', bStack[bStack.length - 1].line, "Missing '}' — rectangle '" + bStack[bStack.length - 1].label + "' is never closed"));
@@ -2265,7 +2296,7 @@ P.parseState = function (lines, meta) {
 
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + SNAME + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
-      if (!states.has(m[2])) D.push(P.d('error', ln, "note refers to '" + m[2] + "' which is not declared"));
+      if (!states.has(m[2])) D.push(P.dW('error', lines[i], m[2], "note refers to '" + m[2] + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: m[2], text: m[3] != null ? [m[3]] : [], line: ln, parent: scope() || null };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -2291,8 +2322,11 @@ P.parseState = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['state', 'note', 'title', 'hide', 'end note']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event'));
+    var stWord = t.split(/\s+/)[0];
+    var sug = P.suggest(stWord, ['state', 'note', 'title', 'hide', 'end note']);
+    var dU = P.dW('error', lines[i], stWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Transitions look like: A --> B : event');
+    if (sug) dU.fix = { line: ln, find: stWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (scopeStack.length) D.push(P.d('error', states.get(scopeStack[scopeStack.length - 1]).line, "Missing '}' — composite state '" + scopeStack[scopeStack.length - 1] + "' is never closed"));
@@ -2483,6 +2517,155 @@ P.renderState = function (model, M, meta) {
   });
 
   return { body: out, w: lay.w + 60, h: lay.h + 8 };
+};
+
+})(PUML);
+
+/* PlantUML Studio — editor services (pure, DOM-free): completion context, candidates. */
+'use strict';
+(function (P) {
+
+/* statement-starter keywords / snippets per diagram type ('*' = any type) */
+var KW = {
+  '*': [
+    { l: 'title ', d: 'diagram title' },
+    { l: '@startuml', d: 'document start' },
+    { l: '@enduml', d: 'document end' },
+    { l: 'note left of ', d: 'note (needs a target)' },
+    { l: 'note right of ', d: 'note (needs a target)' },
+    { l: 'end note', d: 'close a multi-line note' },
+    { l: 'skinparam ', d: 'accepted, not interpreted' },
+    { l: 'hide ', d: 'accepted, not interpreted' }
+  ],
+  class: [
+    { l: 'class ', d: 'declare a class' },
+    { l: 'abstract class ', d: 'abstract class' },
+    { l: 'interface ', d: 'declare an interface' },
+    { l: 'enum ', d: 'declare an enumeration' },
+    { l: 'annotation ', d: 'declare an annotation' },
+    { l: 'package ', d: 'group into a package { }' },
+    { l: 'note top of ', d: 'note above a class' },
+    { l: 'note bottom of ', d: 'note below a class' }
+  ],
+  object: [
+    { l: 'object ', d: 'declare an object' },
+    { l: 'map ', d: 'not supported (warning)' }
+  ],
+  sequence: [
+    { l: 'participant ', d: 'declare a participant' },
+    { l: 'actor ', d: 'stick-figure participant' },
+    { l: 'database ', d: 'database participant' },
+    { l: 'boundary ', d: 'participant (plain box here)' },
+    { l: 'control ', d: 'participant (plain box here)' },
+    { l: 'entity ', d: 'participant (plain box here)' },
+    { l: 'queue ', d: 'participant (plain box here)' },
+    { l: 'collections ', d: 'participant (plain box here)' },
+    { l: 'activate ', d: 'open an activation bar' },
+    { l: 'deactivate ', d: 'close an activation bar' },
+    { l: 'destroy ', d: 'end a lifeline with ✕' },
+    { l: 'return ', d: 'reply + deactivate' },
+    { l: 'autonumber', d: 'number the messages' },
+    { l: 'alt ', d: 'alternatives … else … end' },
+    { l: 'else ', d: 'next branch' },
+    { l: 'opt ', d: 'optional block … end' },
+    { l: 'loop ', d: 'loop block … end' },
+    { l: 'par ', d: 'parallel block … end' },
+    { l: 'break ', d: 'break block … end' },
+    { l: 'critical ', d: 'critical block … end' },
+    { l: 'group ', d: 'named block … end' },
+    { l: 'end', d: 'close alt/opt/loop/…' },
+    { l: 'note over ', d: 'note across lifelines' },
+    { l: 'ref over ', d: 'reference fragment' },
+    { l: 'hide footbox', d: 'no bottom participant boxes' },
+    { l: '== ', d: 'divider: == Phase ==' },
+    { l: '... ', d: 'delay: ... later ...' }
+  ],
+  usecase: [
+    { l: 'actor ', d: 'declare an actor' },
+    { l: 'usecase ', d: 'declare a use case' },
+    { l: 'rectangle ', d: 'system boundary { }' },
+    { l: 'left to right direction', d: 'layout hint' }
+  ],
+  state: [
+    { l: 'state ', d: 'declare a state' },
+    { l: '[*] --> ', d: 'initial transition' }
+  ]
+};
+
+/* Completion context at (lineText, col 0-based chars before cursor).
+   Returns {mode:'none'|'stmt'|'ident'|'any', prefix, start} — start = char index of the prefix. */
+P.completionContext = function (lineText, col) {
+  var before = String(lineText || '').slice(0, col);
+  if (((before.match(/"/g) || []).length) % 2 === 1) return { mode: 'none' };
+  /* after "… : " we are in free label/member text */
+  if (/\s:\s/.test(before) || /\s:$/.test(before)) return { mode: 'none' };
+  if (/^\s*'/.test(before)) return { mode: 'none' };
+  var m = /([A-Za-z_$@][\w.$]*)?$/.exec(before);
+  var prefix = m[1] || '';
+  var start = col - prefix.length;
+  var pre = before.slice(0, start);
+  if (/^\s*$/.test(pre)) return { mode: 'stmt', prefix: prefix, start: start };
+  if (/\b(?:of|over|from|to)\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/[-.=~]{1,2}(?:\|>|>>|>|\*|o)?\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/(?:<\||<<|<|\*|o)?[-.=~]{1,2}$/.test(pre)) return { mode: 'none' }; /* still typing the arrow */
+  if (/,\s*$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  if (/\b(?:extends|implements|as)\s+$/.test(pre)) return { mode: 'ident', prefix: prefix, start: start };
+  return { mode: 'any', prefix: prefix, start: start };
+};
+
+/* Names usable as references, from a compiled model. Returns [{name, insert, d}]. */
+P.collectIdents = function (model, type) {
+  var out = [];
+  if (!model) return out;
+  function push(name, insert, d) {
+    if (!name || name.charAt(0) === '@') return;
+    out.push({ name: name, insert: insert || name, d: d || '' });
+  }
+  if (type === 'class' && model.classes) {
+    model.classes.forEach(function (c) { push(c.id, c.id, c.kind); });
+  } else if (type === 'object' && model.objects) {
+    model.objects.forEach(function (o) { push(o.id, o.id, 'object'); });
+  } else if (type === 'sequence' && model.parts) {
+    model.parts.forEach(function (p) { push(p.id, /[^\w.$@]/.test(p.id) ? '"' + p.id + '"' : p.id, p.kind); });
+  } else if (type === 'usecase' && model.els) {
+    model.els.forEach(function (e) {
+      var ins = e.id;
+      if (/[^\w.$]/.test(e.id)) ins = e.kind === 'actor' ? ':' + e.id + ':' : '(' + e.id + ')';
+      push(e.id, ins, e.kind);
+    });
+  } else if (type === 'state' && model.states) {
+    model.states.forEach(function (s) {
+      if (s.kind === 'initial' || s.kind === 'final') return;
+      push(s.id, /[^\w.$]/.test(s.id) ? '"' + s.id + '"' : s.id, s.kind);
+    });
+  }
+  return out;
+};
+
+/* Ranked candidates for a context. Returns [{label, insert, kind, d}] (max 12). */
+P.completionsFor = function (ctx, type, idents) {
+  if (!ctx || ctx.mode === 'none') return [];
+  var pfx = (ctx.prefix || '').toLowerCase();
+  var out = [], seen = new Set();
+  function add(label, insert, kind, d) {
+    if (seen.has(label)) return;
+    if (pfx && label.toLowerCase().indexOf(pfx) !== 0) return;
+    if (label.toLowerCase() === pfx && insert === ctx.prefix) return; /* nothing to add */
+    seen.add(label);
+    out.push({ label: label, insert: insert, kind: kind, d: d || '' });
+  }
+  var kws = (KW[type] || []).concat(KW['*']);
+  var ids = idents || [];
+  if (ctx.mode === 'ident') {
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+  } else if (ctx.mode === 'stmt') {
+    kws.forEach(function (k) { add(k.l.trim(), k.l, 'kw', k.d); });
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+  } else {
+    ids.forEach(function (x) { add(x.name, x.insert, 'ident', x.d); });
+    kws.forEach(function (k) { add(k.l.trim(), k.l, 'kw', k.d); });
+  }
+  return out.slice(0, 12);
 };
 
 })(PUML);

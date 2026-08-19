@@ -109,7 +109,7 @@ P.parseUsecase = function (lines, meta) {
     /* note */
     if ((m = new RegExp('^note\\s+(left|right|top|bottom)\\s+of\\s+(' + REF + ')\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = refToId(m[2]).id;
-      if (!els.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which is not declared"));
+      if (!els.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which is not declared"));
       var nb = { id: '@note' + (noteCount++), side: m[1].toLowerCase(), target: tgt, text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) notes.push(nb); else noteBuf = nb;
       continue;
@@ -130,8 +130,11 @@ P.parseUsecase = function (lines, meta) {
       continue;
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '')));
+    var uWord = t.split(/\s+/)[0];
+    var sug = P.suggest(uWord, ['actor', 'usecase', 'rectangle', 'note', 'title', 'left to right direction']);
+    var dU = P.dW('error', lines[i], uWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : ''));
+    if (sug) dU.fix = { line: ln, find: uWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   if (bStack.length) D.push(P.d('error', bStack[bStack.length - 1].line, "Missing '}' — rectangle '" + bStack[bStack.length - 1].label + "' is never closed"));

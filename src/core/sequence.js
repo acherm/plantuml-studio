@@ -91,14 +91,14 @@ P.parseSequence = function (lines, meta) {
     /* notes and ref */
     if ((m = new RegExp('^[hr]?note\\s+(left|right)(?:\\s+of)?\\s+(' + PNAME + '|"[^"]+")\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgt = P.unquote(m[2]);
-      if (!parts.has(tgt)) D.push(P.d('error', ln, "note refers to '" + tgt + "' which has not appeared yet"));
+      if (!parts.has(tgt)) D.push(P.dW('error', lines[i], tgt, "note refers to '" + tgt + "' which has not appeared yet"));
       var nb = { k: 'note', side: m[1].toLowerCase(), targets: [tgt], text: m[3] != null ? [m[3]] : [], line: ln };
       if (m[3] != null) events.push(nb); else noteBuf = nb;
       continue;
     }
     if ((m = new RegExp('^[hr]?note\\s+over\\s+((?:' + PNAME + '|"[^"]+")(?:\\s*,\\s*(?:' + PNAME + '|"[^"]+"))*)\\s*(?::\\s*(.*))?$', 'i').exec(t))) {
       var tgts = m[1].split(/\s*,\s*/).map(P.unquote);
-      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.d('error', ln, "note refers to '" + g + "' which has not appeared yet")); });
+      tgts.forEach(function (g) { if (!parts.has(g)) D.push(P.dW('error', lines[i], g, "note refers to '" + g + "' which has not appeared yet")); });
       var nb2 = { k: 'note', side: 'over', targets: tgts, text: m[2] != null ? [m[2]] : [], line: ln };
       if (m[2] != null) events.push(nb2); else noteBuf = nb2;
       continue;
@@ -133,7 +133,7 @@ P.parseSequence = function (lines, meta) {
     /* activate / deactivate / destroy / create */
     if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$').exec(t))) {
       var pid = P.unquote(m[2]);
-      if (!parts.has(pid)) { D.push(P.d('error', ln, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
+      if (!parts.has(pid)) { D.push(P.dW('error', lines[i], pid, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
       events.push({ k: m[1], id: pid, line: ln });
       continue;
     }
@@ -164,8 +164,11 @@ P.parseSequence = function (lines, meta) {
       }
     }
 
-    var sug = P.suggest(t.split(/\s+/)[0], PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
-    D.push(P.d('error', ln, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text'));
+    var sWord = t.split(/\s+/)[0];
+    var sug = P.suggest(sWord, PKINDS.concat(['alt', 'opt', 'loop', 'par', 'break', 'critical', 'group', 'end', 'else', 'note', 'ref', 'activate', 'deactivate', 'destroy', 'return', 'autonumber', 'title']));
+    var dU = P.dW('error', lines[i], sWord, 'Unrecognized statement: "' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '"' + (sug ? ' — did you mean "' + sug + '"?' : '') + '. Messages look like: A -> B : text');
+    if (sug) dU.fix = { line: ln, find: sWord, replace: sug, title: 'Replace with "' + sug + '"' };
+    D.push(dU);
   }
 
   fragStack.forEach(function (fr) {

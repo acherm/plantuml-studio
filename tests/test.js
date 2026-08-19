@@ -253,5 +253,58 @@ P.EXAMPLES.forEach(ex => {
   });
 }
 
+/* ---------- editor services: completion context ---------- */
+{
+  const cc = P.completionContext;
+  eq(cc('cla', 3).mode, 'stmt', 'line start → stmt context');
+  eq(cc('cla', 3).prefix, 'cla', 'prefix captured');
+  eq(cc('A --> Bo', 8).mode, 'ident', 'after arrow → ident context');
+  eq(cc('note right of Ca', 16).mode, 'ident', 'after of → ident context');
+  eq(cc('A -> B : some mess', 18).mode, 'none', 'inside message label → none');
+  eq(cc('class "My na', 12).mode, 'none', 'inside quotes → none');
+  eq(cc('A --', 4).mode, 'none', 'typing the arrow → none');
+  eq(cc('class B extends A', 17).mode, 'ident', 'after extends → ident');
+}
+{
+  const res = P.compile('@startuml\nclass Car\nclass Wheel\nCar *-- Wheel\n@enduml');
+  const ids = P.collectIdents(res.model, res.type);
+  ok(ids.some(x => x.name === 'Car') && ids.some(x => x.name === 'Wheel'), 'collectIdents finds classes');
+  const comp = P.completionsFor({ mode: 'ident', prefix: 'Ca', start: 0 }, 'class', ids);
+  ok(comp.length === 1 && comp[0].insert === 'Car', 'ident completion filtered by prefix');
+  const stmt = P.completionsFor({ mode: 'stmt', prefix: 'cl', start: 0 }, 'class', ids);
+  ok(stmt.some(c => c.insert === 'class '), 'stmt completion offers class keyword');
+  ok(!stmt.some(c => c.label === 'participant'), 'no sequence keywords in class type');
+}
+{
+  const seq = P.compile('@startuml\nparticipant "Web UI" as W\nAlice -> W : hi\n@enduml');
+  const ids = P.collectIdents(seq.model, 'sequence');
+  const w = ids.filter(x => x.name === 'W')[0];
+  ok(w && w.insert === 'W', 'sequence alias inserted bare');
+  const uc = P.compile('@startuml\n:Some Person: --> (Do a thing)\n@enduml');
+  const uids = P.collectIdents(uc.model, 'usecase');
+  ok(uids.some(x => x.insert === ':Some Person:'), 'actor with spaces inserted as :…:');
+  ok(uids.some(x => x.insert === '(Do a thing)'), 'usecase with spaces inserted as (…)');
+}
+
+/* ---------- quick fixes & columns ---------- */
+{
+  const res = P.compile('@startuml\nclas Vehicle\n@enduml');
+  const d = res.diagnostics.filter(x => /did you mean/.test(x.message))[0];
+  ok(d && d.fix && d.fix.find === 'clas' && d.fix.replace === 'class', 'typo diagnostic carries a fix');
+  ok(d.col === 1 && d.len === 4, 'typo diagnostic has column + length (got col ' + d.col + ' len ' + d.len + ')');
+}
+{
+  const res = P.compile('class A\n');
+  const s = res.diagnostics.filter(x => /Missing @startuml/.test(x.message))[0];
+  const e = res.diagnostics.filter(x => /Missing @enduml/.test(x.message))[0];
+  ok(s && s.fix && s.fix.insertTop === '@startuml', '@startuml fix present');
+  ok(e && e.fix && e.fix.append === '@enduml', '@enduml fix present');
+}
+{
+  const res = P.compile('@startuml\nclass A\n  note left of Zed : x\n@enduml');
+  const d = res.diagnostics.filter(x => /Zed/.test(x.message))[0];
+  ok(d && d.col === 16 && d.len === 3, 'note-target column respects indentation (got col ' + (d && d.col) + ')');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

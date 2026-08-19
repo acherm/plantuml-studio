@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PlantUML Studio — conformance harness</title>
+</head>
+<body>
+<p>Runs the corpus through Studio's checker and the vendored official engine, then dumps JSON into #results.
+Driven by <code>node tools/conformance.js</code>.</p>
+<div id="target" style="position:absolute; left:-99999px; top:0;"></div>
+<pre id="results"></pre>
+<script src="../dist/puml-core.cjs"></script>
+<script src="conformance-corpus.js"></script>
+<script src="../vendor/viz-global.js"></script>
+<script type="module">
+import { render } from '../vendor/plantuml.js';
+
+const target = document.getElementById('target');
+
+function svgText(html) {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.textContent || '').replace(/\s+/g, ' ');
+}
+
+async function officialSvg(code) {
+  const lines = code.split(/\r\n|\r|\n/);
+  target.innerHTML = '';
+  try { render(lines, 'target'); } catch (e) { return null; }
+  for (let i = 0; i < 600; i++) {
+    if (target.querySelector('svg')) return target.innerHTML;
+    await new Promise(res => setTimeout(res, 50));
+  }
+  return null;
+}
+
+function officialVerdict(svg) {
+  if (svg == null) return 'crash';
+  const text = svgText(svg);
+  if (/welcome to plantuml/i.test(text)) return 'empty';
+  /* PlantUML error images embed the source plus a message such as
+     "Syntax Error?", "Cannot create group", "Not known: X", "Cannot find X" */
+  if (/syntax\s*error|cannot\s+(?:find|create|open|parse)|not\s+known\s*:|assumed\s+diagram\s+type/i.test(text)) return 'error';
+  return 'ok';
+}
+
+let corpus = CONF_CORPUS.concat(PUML.EXAMPLES
+  .filter(e => e.name !== 'Blank')
+  .map(e => ({ name: 'example: ' + e.name, code: e.code, ours: e.name.indexOf('Broken') === 0 ? 'error' : 'ok' })));
+
+/* chunking: ?from=N&count=M lets the driver keep each browser run short */
+const qs = new URLSearchParams(location.search);
+const fullTotal = corpus.length;
+const from = parseInt(qs.get('from') || '0', 10);
+const count = parseInt(qs.get('count') || String(corpus.length), 10);
+corpus = corpus.slice(from, from + count);
+
+const results = [];
+for (const c of corpus) {
+  const res = PUML.compile(c.code);
+  const oursV = res.diagnostics.some(d => d.severity === 'error') ? 'error' : 'ok';
+  const svg = await officialSvg(c.code);
+  const offV = officialVerdict(svg);
+  const row = {
+    name: c.name,
+    expected: c.ours || null,
+    ours: oursV,
+    official: offV,
+    agree: oursV === offV || (offV === 'empty' && oursV === 'ok'),
+    selfCheck: !c.ours || c.ours === oursV
+  };
+  if (!row.agree) row.officialText = svgText(svg || '').slice(0, 260);
+  results.push(row);
+}
+document.getElementById('results').textContent = JSON.stringify({
+  from: from, count: results.length, fullTotal: fullTotal, results: results
+}, null, 1);
+document.title = 'CONF-DONE';
+</script>
+</body>
+</html>
