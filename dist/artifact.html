@@ -159,12 +159,37 @@ select.btn { padding: 7px 8px; }
   top: calc(100% + 6px);
   left: 0;
   z-index: 40;
-  min-width: 230px;
+  min-width: 260px;
+  max-width: 420px;
+  max-height: min(72vh, 620px);
+  overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
   box-shadow: var(--shadow);
   padding: 5px;
+}
+.menu-filter {
+  position: sticky;
+  top: 0;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 5px;
+  padding: 7px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--ink);
+  font: 13px 'IBM Plex Sans', sans-serif;
+  outline: none;
+}
+.menu-filter:focus { border-color: var(--accent); }
+.menu .no-match {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: italic;
 }
 .menu button {
   display: block;
@@ -4225,8 +4250,28 @@ function toast(msg) {
   setTimeout(function () { t.remove(); }, 1900);
 }
 
-/* examples menu */
+/* examples menu (with a filter box once the list grows — e.g. course editions) */
 var menu = $('menuExamples');
+var menuFilter = null;
+if (PUML.EXAMPLES.length > 12) {
+  menuFilter = document.createElement('input');
+  menuFilter.className = 'menu-filter';
+  menuFilter.type = 'search';
+  menuFilter.placeholder = 'Filter ' + PUML.EXAMPLES.length + ' examples…';
+  menuFilter.setAttribute('aria-label', 'Filter examples');
+  menuFilter.addEventListener('input', function () { filterMenu(menuFilter.value); });
+  menuFilter.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      var first = menu.querySelector('button:not(.hidden)');
+      if (first) first.click();
+    }
+  });
+  menu.appendChild(menuFilter);
+}
+var noMatch = document.createElement('div');
+noMatch.className = 'no-match hidden';
+noMatch.textContent = 'No example matches.';
+menu.appendChild(noMatch);
 PUML.EXAMPLES.forEach(function (ex, i) {
   var b = document.createElement('button');
   b.setAttribute('role', 'menuitem');
@@ -4237,6 +4282,18 @@ PUML.EXAMPLES.forEach(function (ex, i) {
   });
   menu.appendChild(b);
 });
+function filterMenu(q) {
+  q = (q || '').toLowerCase().trim();
+  var terms = q.split(/\s+/).filter(Boolean);
+  var any = false;
+  Array.prototype.forEach.call(menu.querySelectorAll('button'), function (b) {
+    var t = b.textContent.toLowerCase();
+    var show = terms.every(function (w) { return t.indexOf(w) >= 0; });
+    b.classList.toggle('hidden', !show);
+    if (show) any = true;
+  });
+  noMatch.classList.toggle('hidden', any);
+}
 function loadExample(i) {
   var ex = PUML.EXAMPLES[i];
   if (!ex) return;
@@ -4252,6 +4309,11 @@ function loadExample(i) {
 $('btnExamples').addEventListener('click', function (e) {
   e.stopPropagation();
   menu.classList.toggle('hidden');
+  if (!menu.classList.contains('hidden') && menuFilter) {
+    menuFilter.value = '';
+    filterMenu('');
+    menuFilter.focus();
+  }
 });
 document.addEventListener('click', function (e) {
   if (!menu.classList.contains('hidden') && !menu.contains(e.target)) menu.classList.add('hidden');

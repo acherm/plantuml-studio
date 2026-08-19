@@ -157,12 +157,37 @@ select.btn { padding: 7px 8px; }
   top: calc(100% + 6px);
   left: 0;
   z-index: 40;
-  min-width: 230px;
+  min-width: 260px;
+  max-width: 420px;
+  max-height: min(72vh, 620px);
+  overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
   box-shadow: var(--shadow);
   padding: 5px;
+}
+.menu-filter {
+  position: sticky;
+  top: 0;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 5px;
+  padding: 7px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--ink);
+  font: 13px 'IBM Plex Sans', sans-serif;
+  outline: none;
+}
+.menu-filter:focus { border-color: var(--accent); }
+.menu .no-match {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: italic;
 }
 .menu button {
   display: block;
