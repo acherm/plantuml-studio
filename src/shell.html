@@ -1,0 +1,105 @@
+<title>PlantUML Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>/*__CSS__*/</style>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="27" height="27" rx="6" fill="#FEFECE" stroke="#A80036" stroke-width="1.6"/>
+        <line x1="5.5" y1="11" x2="24.5" y2="11" stroke="#A80036" stroke-width="1.4"/>
+        <line x1="5.5" y1="18" x2="24.5" y2="18" stroke="#A80036" stroke-width="1.4"/>
+        <line x1="8" y1="6.5" x2="17" y2="6.5" stroke="#A80036" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="8" y1="14.5" x2="14" y2="14.5" stroke="#A80036" stroke-width="1.6" stroke-linecap="round" opacity="0.75"/>
+        <line x1="8" y1="22" x2="19" y2="22" stroke="#A80036" stroke-width="1.6" stroke-linecap="round" opacity="0.75"/>
+      </svg>
+      <div>
+        <h1>PlantUML Studio</h1>
+        <span class="sub">offline editor · live validation</span>
+      </div>
+    </div>
+    <div class="actions">
+      <div class="menu-wrap">
+        <button id="btnExamples" class="btn" aria-haspopup="true">Examples ▾</button>
+        <div id="menuExamples" class="menu hidden" role="menu"></div>
+      </div>
+      <select id="selType" class="btn" title="Diagram type">
+        <option value="auto">Type: auto</option>
+        <option value="class">Class</option>
+        <option value="object">Object</option>
+        <option value="sequence">Sequence</option>
+        <option value="usecase">Use case</option>
+        <option value="state">State</option>
+      </select>
+      <button id="btnHelp" class="btn">Syntax help</button>
+      <span class="vr"></span>
+      <button id="btnCopy" class="btn" title="Copy the PlantUML source">Copy code</button>
+      <button id="btnSvg" class="btn" title="Download the diagram as SVG">SVG</button>
+      <button id="btnPng" class="btn" title="Download the diagram as PNG">PNG</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="pane editor-pane">
+      <div class="editor">
+        <div class="gutter"><div class="gutter-inner" id="gutter"></div></div>
+        <div class="codewrap">
+          <pre class="hl" id="hl" aria-hidden="true"></pre>
+          <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"
+            aria-label="PlantUML source code"></textarea>
+        </div>
+      </div>
+      <div class="problems" id="problems">
+        <div class="problems-head" id="problemsHead">
+          <span>Problems</span><span class="cnt" id="problemsCnt"></span>
+          <button class="mini" id="btnToggleProblems" title="Collapse">▾</button>
+        </div>
+        <ul id="problemsList"></ul>
+      </div>
+    </section>
+
+    <div class="divider" id="divider" role="separator" aria-orientation="vertical"></div>
+
+    <section class="pane preview-pane">
+      <div class="canvas" id="canvas">
+        <div class="viewport" id="viewport"></div>
+        <div class="placeholder hidden" id="placeholder">
+          <div class="card">
+            <strong>Nothing to draw yet.</strong><br>
+            Type PlantUML on the left, or pick an <em>Example</em> above.<br>
+            <code>@startuml</code> … <code>@enduml</code>
+          </div>
+        </div>
+        <div class="errbadge hidden" id="errBadge"></div>
+      </div>
+      <div class="zoombar">
+        <button id="zOut" title="Zoom out">−</button>
+        <button id="zFit" title="Fit diagram">Fit</button>
+        <button id="z100" title="Actual size">100%</button>
+        <button id="zIn" title="Zoom in">+</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <div id="statusPill" class="pill ok" title="Show or hide the problems panel">Valid</div>
+    <div id="statusCounts"></div>
+    <div class="spacer"></div>
+    <div id="statusType"></div>
+    <div id="statusPos" class="mono">Ln 1, Col 1</div>
+  </footer>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Syntax reference">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>Syntax reference</h2>
+        <div class="modal-tabs" id="modalTabs"></div>
+        <button class="modal-close" id="modalClose" title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+</div>
+<script>
+//__CORE__
+//__APP__
+</script>
