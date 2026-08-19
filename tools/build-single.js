@@ -12,6 +12,7 @@ const args = process.argv.slice(2);
 const argOf = f => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null; };
 const extraFile = argOf('--extra');
 const outFile = argOf('--out');
+const brand = argOf('--brand'); /* e.g. "édition cours CPOO": shown as subtitle + appended to <title> */
 
 const CORE_FILES = ['pre.js', 'layout.js', 'classdiag.js', 'sequence.js', 'usecase.js', 'state.js', 'editor.js', 'main.js'];
 let core = CORE_FILES.map(f => fs.readFileSync(path.join(root, 'src/core', f), 'utf8')).join('\n');
@@ -22,10 +23,17 @@ const css = fs.readFileSync(path.join(root, 'src/style.css'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
 
 function assemble(tpl) {
-  return tpl
+  let out = tpl
     .replace('/*__CSS__*/', () => css)
     .replace('//__CORE__', () => core)
     .replace('//__APP__', () => app);
+  if (brand) {
+    out = out
+      .replace('<title>PlantUML Studio</title>', () => '<title>PlantUML Studio · ' + brand + '</title>')
+      .replace('<span class="sub">offline editor · live validation</span>',
+               () => '<span class="sub">' + brand + '</span>');
+  }
+  return out;
 }
 
 const body = assemble(shell);

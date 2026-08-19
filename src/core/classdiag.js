@@ -451,13 +451,13 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
   /* multi-edge offsets between the same pair */
   var pairCount = new Map(), pairSeen = new Map();
   edges.forEach(function (e) {
-    var k = e.from < e.to ? e.from + ' ' + e.to : e.to + ' ' + e.from;
+    var k = e.from < e.to ? e.from + '\u0000' + e.to : e.to + '\u0000' + e.from;
     pairCount.set(k, (pairCount.get(k) || 0) + 1);
   });
 
   edges.forEach(function (e) {
     if (!lay.pos.has(e.from) || !lay.pos.has(e.to)) return;
-    var k = e.from < e.to ? e.from + ' ' + e.to : e.to + ' ' + e.from;
+    var k = e.from < e.to ? e.from + '\u0000' + e.to : e.to + '\u0000' + e.from;
     var n = pairCount.get(k), idx = pairSeen.get(k) || 0;
     pairSeen.set(k, idx + 1);
     var offset = n > 1 ? (idx - (n - 1) / 2) * 18 : 0;
