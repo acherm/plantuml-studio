@@ -27,6 +27,12 @@ var CONF_CORPUS = [
   { name: 'state choice', ours: 'ok', code: '@startuml\n[*] --> A\nstate c1 <<choice>>\nA --> c1\nc1 --> B : [yes]\nc1 --> C : [no]\nB --> [*]\nC --> [*]\n@enduml' },
   { name: 'state description', ours: 'ok', code: '@startuml\n[*] --> S\nS : doing things\nS --> [*]\n@enduml' },
   { name: 'title + comments', ours: 'ok', code: "@startuml\ntitle Hello\n' a comment\nclass A\n@enduml" },
+  { name: 'object diagram, capitalized Object + colon fields', ours: 'ok', code: '@startuml\nObject Library {\nname: "dummy"\naddress: "dummy"\n}\nObject Bookone {\ntittle: "not important"\npages: 10\nrelease: 01/01/2001\n}\nLibrary --> Bookone :has\n@enduml' },
+  { name: 'keyword case-insensitivity: Class/Interface/Extends/Implements/As', ours: 'ok', code: '@startuml\ninterface I\nclass B Extends A Implements I\nclass A\n@enduml' },
+  { name: 'keyword case-insensitivity: Actor/Usecase/State/Participant', ours: 'ok', code: '@startuml\nActor U\nUsecase UC\nU --> UC\n@enduml' },
+  { name: 'keyword case-insensitivity: ALT/ELSE/END, ACTIVATE/DEACTIVATE', ours: 'ok', code: '@startuml\nACTIVATE A\nA -> B : x\nALT cond\nA -> B : y\nElse other\nA -> B : z\nEND\nDeactivate A\n@enduml' },
+  { name: 'activate as the first statement (auto-creates the participant)', ours: 'ok', code: '@startuml\nactivate A\nA -> B : x\ndeactivate A\n@enduml' },
+  { name: 'extends target declared after it is referenced', ours: 'ok', code: '@startuml\nclass B extends A\nclass A\n@enduml' },
 
   /* ---- invalid or misspelled ---- */
   { name: 'typo clas', ours: 'error', code: '@startuml\nclas Foo\n@enduml' },

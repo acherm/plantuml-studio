@@ -31,6 +31,7 @@
         <option value="state">State</option>
       </select>
       <button id="btnHelp" class="btn">Syntax help</button>
+      <button id="btnCode" class="btn" title="Generate Java or Python from the current class diagram">Code</button>
       <span class="vr"></span>
       <button id="btnCopy" class="btn" title="Copy the PlantUML source">Copy code</button>
       <button id="btnSvg" class="btn" title="Download the diagram as SVG">SVG</button>
@@ -106,6 +107,37 @@
     </div>
   </div>
   <div class="etip hidden" id="etip" role="tooltip"></div>
+
+  <div id="codeModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Generate code">
+    <div class="modal-box codegen-box">
+      <div class="modal-head">
+        <h2>Generate code</h2>
+        <div class="modal-tabs" id="codeLangTabs">
+          <button data-lang="java" class="on">Java</button>
+          <button data-lang="python">Python</button>
+        </div>
+        <button class="modal-close" id="codeModalClose" title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="codegen-body">
+        <div class="codegen-col">
+          <div class="codegen-col-head">
+            <span>Template — edit freely, it regenerates live</span>
+            <button class="mini-btn" id="codeResetTemplate" title="Reset to the default template">Reset</button>
+          </div>
+          <textarea id="codeTemplateEditor" class="codegen-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Code template"></textarea>
+        </div>
+        <div class="codegen-col">
+          <div class="codegen-col-head">
+            <select id="codeFileSelect" aria-label="Generated file"></select>
+            <button class="mini-btn" id="codeCopyBtn">Copy</button>
+            <button class="mini-btn" id="codeDownloadBtn">Download</button>
+          </div>
+          <textarea id="codeOutput" class="codegen-textarea codegen-output" readonly spellcheck="false" wrap="off" aria-label="Generated code"></textarea>
+        </div>
+      </div>
+      <div class="codegen-note" id="codeNote"></div>
+    </div>
+  </div>
 </div>
 <script>
 //__CORE__

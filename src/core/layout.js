@@ -262,7 +262,36 @@ L.graph = function (spec) {
     }
   }
   lay0.pos.forEach(function (p2, id) { place(id, p2.x, p2.y); });
-  return { pos: abs, rects: rects, w: lay0.w, h: lay0.h };
+
+  var w = lay0.w, h = lay0.h;
+  var overrides = spec.overrides;
+  if (overrides) {
+    /* only top-level nodes can be manually repositioned (v1 limitation —
+       a node inside a package/boundary/composite state stays auto-placed) */
+    Object.keys(overrides).forEach(function (id) {
+      if (abs.has(id) && !parentOf.has(id)) abs.set(id, { x: overrides[id].x, y: overrides[id].y });
+    });
+    var minX = 0, minY = 0, maxX = 0, maxY = 0, any = false;
+    abs.forEach(function (p2, id) {
+      var n = nodeById.get(id); if (!n) return;
+      any = true;
+      minX = Math.min(minX, p2.x); minY = Math.min(minY, p2.y);
+      maxX = Math.max(maxX, p2.x + n.w); maxY = Math.max(maxY, p2.y + n.h);
+    });
+    rects.forEach(function (rc) {
+      any = true;
+      minX = Math.min(minX, rc.x); minY = Math.min(minY, rc.y);
+      maxX = Math.max(maxX, rc.x + rc.w); maxY = Math.max(maxY, rc.y + rc.h);
+    });
+    if (any && (minX < 0 || minY < 0)) {
+      var dx = -Math.min(0, minX), dy = -Math.min(0, minY);
+      abs.forEach(function (p2, id) { abs.set(id, { x: p2.x + dx, y: p2.y + dy }); });
+      rects.forEach(function (rc, id) { rects.set(id, { x: rc.x + dx, y: rc.y + dy, w: rc.w, h: rc.h }); });
+      maxX += dx; maxY += dy;
+    }
+    if (any) { w = Math.max(w, maxX); h = Math.max(h, maxY); }
+  }
+  return { pos: abs, rects: rects, w: w, h: h };
 };
 
 /* ---------- shared edge drawing between laid-out nodes ---------- */

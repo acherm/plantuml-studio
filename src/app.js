@@ -157,6 +157,7 @@ function compileNow() {
   renderStatus(res, counts);
   renderPreview(res, counts);
   if (renderMode === 'plantuml') scheduleOfficial();
+  if (codeModal && !codeModal.classList.contains('hidden')) regenerateCode();
   try { localStorage.setItem(LS_DOC, text); localStorage.setItem(LS_TYPE, type); } catch (e) {}
 }
 
@@ -308,6 +309,111 @@ $('z100').addEventListener('click', function () {
   applyView();
 });
 window.addEventListener('resize', function () { if (!view.touched) fit(); });
+
+/* ---------------- graphical bi-sync editing ----------------
+   The rendered SVG is a pure function of the text (see P.compile). These
+   handlers never touch a separate diagram model — every interaction reads
+   the node's data-* attributes off the SVG the renderer already produced,
+   then rewrites elCode.value with a text-surgical core helper and
+   recompiles. Click navigates; drag persists a position via an
+   auto-managed `' @pos id x,y` comment (an ordinary PlantUML comment, so
+   the source stays valid outside this editor too); double-click renames
+   the identifier everywhere it's referenced. */
+function svgNodeAt(target) { return target && target.closest ? target.closest('.pu-node') : null; }
+
+var selectedNodeG = null;
+function clearNodeSelection() { if (selectedNodeG) selectedNodeG.classList.remove('pu-selected'); selectedNodeG = null; }
+function selectNode(g) { clearNodeSelection(); selectedNodeG = g; g.classList.add('pu-selected'); }
+
+var dragState = null, justDragged = false;
+elVpStudio.addEventListener('pointerdown', function (e) {
+  if (e.button !== 0) return;
+  var g = svgNodeAt(e.target);
+  if (!g || g.getAttribute('data-draggable') !== '1') return;
+  e.stopPropagation();
+  dragState = {
+    g: g, pointerId: e.pointerId, moved: false,
+    startX: e.clientX, startY: e.clientY,
+    origX: parseFloat(g.getAttribute('data-x')) || 0,
+    origY: parseFloat(g.getAttribute('data-y')) || 0
+  };
+  g.classList.add('pu-dragging');
+  try { g.setPointerCapture(e.pointerId); } catch (err) {}
+});
+elVpStudio.addEventListener('pointermove', function (e) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  var dx = (e.clientX - dragState.startX) / view.zoom;
+  var dy = (e.clientY - dragState.startY) / view.zoom;
+  if (Math.abs(dx) + Math.abs(dy) > 2) dragState.moved = true;
+  dragState.dx = dx; dragState.dy = dy;
+  dragState.g.setAttribute('transform', 'translate(' + dx + ',' + dy + ')');
+});
+function endNodeDrag() {
+  if (!dragState) return;
+  var g = dragState.g;
+  g.classList.remove('pu-dragging');
+  g.removeAttribute('transform');
+  if (dragState.moved) {
+    justDragged = true;
+    var id = g.getAttribute('data-node');
+    elCode.value = PUML.upsertPosOverride(elCode.value, id, dragState.origX + dragState.dx, dragState.origY + dragState.dy);
+    compileNow();
+  }
+  dragState = null;
+}
+elVpStudio.addEventListener('pointerup', endNodeDrag);
+elVpStudio.addEventListener('pointercancel', endNodeDrag);
+
+elVpStudio.addEventListener('click', function (e) {
+  if (justDragged) { justDragged = false; return; }
+  var g = svgNodeAt(e.target);
+  if (!g) { clearNodeSelection(); return; }
+  selectNode(g);
+  var line = g.getAttribute('data-line');
+  if (line) gotoLine(+line);
+});
+
+function startNodeRename(g) {
+  var id = g.getAttribute('data-node');
+  if (!id || id.charAt(0) === '@') return; /* notes and pseudo-states have no user-facing name to rename */
+  var rect = g.getBoundingClientRect();
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'pu-rename-input';
+  inp.value = id;
+  inp.spellcheck = false;
+  inp.style.left = rect.left + 'px';
+  inp.style.top = rect.top + 'px';
+  inp.style.width = Math.max(rect.width, 70) + 'px';
+  document.body.appendChild(inp);
+  inp.focus();
+  inp.select();
+  var done = false;
+  function commit() {
+    if (done) return;
+    done = true;
+    var newName = inp.value.trim();
+    inp.remove();
+    if (!newName || newName === id) return;
+    var result = PUML.renameIdentifier(elCode.value, id, newName);
+    if (result.error) { toast(result.error); return; }
+    elCode.value = result.text;
+    compileNow();
+    toast("Renamed '" + id + "' to '" + newName + "'");
+  }
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); done = true; inp.remove(); }
+    e.stopPropagation();
+  });
+  inp.addEventListener('blur', commit);
+}
+elVpStudio.addEventListener('dblclick', function (e) {
+  var g = svgNodeAt(e.target);
+  if (!g) return;
+  e.preventDefault();
+  startNodeRename(g);
+});
 
 /* ---------------- editor behaviour ---------------- */
 elCode.addEventListener('input', function () { renderHighlight(); schedule(); updatePos(); maybeComplete(false); });
@@ -545,6 +651,11 @@ function openHelp(type) {
     "Comments start with '. Documents should be wrapped in @startuml … @enduml. " +
     'Global directives (title, skinparam, hide, scale, …) are accepted; skinparam styling and the preprocessor (!include, !define) are not interpreted.';
   modalBody.appendChild(note);
+  var note2 = document.createElement('p');
+  note2.className = 'modal-note';
+  note2.textContent = 'The diagram itself is editable: click a shape to jump to its source line, double-click its name to rename it everywhere, ' +
+    'or drag it to reposition it (class, object, use case and state diagrams — the position is saved as an ordinary \' @pos comment).';
+  modalBody.appendChild(note2);
 }
 $('btnHelp').addEventListener('click', function () {
   openHelp(lastResult && lastResult.type ? lastResult.type : 'class');
@@ -766,6 +877,100 @@ divider.addEventListener('pointermove', function (e) {
   divider.addEventListener(ev, function () { dragging = null; divider.classList.remove('drag'); });
 });
 
+/* ---------------- code generation (Java / Python) ---------------- */
+var codeModal = $('codeModal'), codeLangTabs = $('codeLangTabs');
+var codeTemplateEditor = $('codeTemplateEditor'), codeOutput = $('codeOutput'), codeFileSelect = $('codeFileSelect');
+var codeNote = $('codeNote');
+var CODE_LANG_KEY = 'plantuml-studio.codegen.lang';
+var CODE_TPL_KEY_PREFIX = 'plantuml-studio.codegen.tpl.';
+var codeLang = 'java', codeFiles = [], codeGenTimer = null;
+
+function defaultTemplate(lang) { return lang === 'python' ? PUML.PYTHON_TEMPLATE : PUML.JAVA_TEMPLATE; }
+function loadTemplate(lang) {
+  try { var saved = localStorage.getItem(CODE_TPL_KEY_PREFIX + lang); if (saved != null) return saved; } catch (e) {}
+  return defaultTemplate(lang);
+}
+function saveTemplate(lang, text) {
+  try { localStorage.setItem(CODE_TPL_KEY_PREFIX + lang, text); } catch (e) {}
+}
+function regenerateCode() {
+  if (!lastResult || lastResult.type !== 'class' || !lastResult.model) {
+    codeFiles = [];
+    codeFileSelect.innerHTML = '';
+    codeOutput.value = '';
+    codeNote.textContent = 'Code generation reads a class diagram\'s classes, members and relationships — switch to (or write) one to generate ' + (codeLang === 'python' ? 'Python' : 'Java') + '.';
+    return;
+  }
+  var prevClass = codeFileSelect.value;
+  try {
+    codeFiles = PUML.genCode(lastResult.model, codeTemplateEditor.value, codeLang);
+    codeNote.textContent = codeFiles.length + ' file' + (codeFiles.length === 1 ? '' : 's') +
+      ' generated from the class diagram — inherited interface/abstract methods are stubbed in, and constructors chain to their superclass.';
+  } catch (e) {
+    codeFiles = [];
+    codeNote.textContent = 'Template error: ' + (e && e.message ? e.message : e);
+  }
+  codeFileSelect.innerHTML = '';
+  codeFiles.forEach(function (f) {
+    var opt = document.createElement('option');
+    opt.value = f.className; opt.textContent = f.filename;
+    codeFileSelect.appendChild(opt);
+  });
+  if (codeFiles.length) {
+    var idx = -1;
+    for (var i = 0; i < codeFiles.length; i++) if (codeFiles[i].className === prevClass) { idx = i; break; }
+    codeFileSelect.selectedIndex = idx >= 0 ? idx : 0;
+    codeOutput.value = codeFiles[codeFileSelect.selectedIndex].code;
+  } else {
+    codeOutput.value = '';
+  }
+}
+codeFileSelect.addEventListener('change', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  codeOutput.value = f ? f.code : '';
+});
+codeTemplateEditor.addEventListener('input', function () {
+  saveTemplate(codeLang, codeTemplateEditor.value);
+  clearTimeout(codeGenTimer);
+  codeGenTimer = setTimeout(regenerateCode, 200);
+});
+$('codeResetTemplate').addEventListener('click', function () {
+  codeTemplateEditor.value = defaultTemplate(codeLang);
+  saveTemplate(codeLang, codeTemplateEditor.value);
+  regenerateCode();
+  toast('Template reset to default');
+});
+$('codeCopyBtn').addEventListener('click', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  if (!f) { toast('Nothing to copy yet'); return; }
+  copyText(f.code, 'Copied ' + f.filename);
+});
+$('codeDownloadBtn').addEventListener('click', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  if (!f) { toast('Nothing to export yet'); return; }
+  exportFile(f.filename, f.code, 'text/plain', f.code);
+});
+function setCodeLang(lang) {
+  codeLang = lang;
+  Array.prototype.forEach.call(codeLangTabs.querySelectorAll('button'), function (b) {
+    b.classList.toggle('on', b.getAttribute('data-lang') === lang);
+  });
+  codeTemplateEditor.value = loadTemplate(lang);
+  try { localStorage.setItem(CODE_LANG_KEY, lang); } catch (e) {}
+  regenerateCode();
+}
+codeLangTabs.addEventListener('click', function (e) {
+  var b = e.target.closest ? e.target.closest('button') : null;
+  if (b) setCodeLang(b.getAttribute('data-lang'));
+});
+$('btnCode').addEventListener('click', function () {
+  codeModal.classList.remove('hidden');
+  regenerateCode();
+});
+$('codeModalClose').addEventListener('click', function () { codeModal.classList.add('hidden'); });
+codeModal.addEventListener('click', function (e) { if (e.target === codeModal) codeModal.classList.add('hidden'); });
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') codeModal.classList.add('hidden'); });
+
 /* ---------------- boot ---------------- */
 (function boot() {
   try {
@@ -774,6 +979,10 @@ divider.addEventListener('pointermove', function (e) {
       main.style.gridTemplateColumns = 'minmax(280px,' + (sp * 100).toFixed(1) + 'fr) 6px minmax(280px,' + ((1 - sp) * 100).toFixed(1) + 'fr)';
     }
   } catch (e) {}
+
+  var savedLang = 'java';
+  try { savedLang = localStorage.getItem(CODE_LANG_KEY) || 'java'; } catch (e) {}
+  setCodeLang(savedLang === 'python' ? 'python' : 'java');
 
   var wantOfficial = /official/.test(location.hash || '');
   var hashEx = /[#&]ex=([^&]+)/.exec(location.hash || '');

@@ -16,6 +16,7 @@ P.compile = function (text, opts) {
   opts = opts || {};
   var M = opts.measure || P.defaultMeasure;
   var pre = P.preprocess(text);
+  pre.meta.posOverrides = P.extractPosOverrides(text);
   var diags = pre.diagnostics.slice();
   var det = P.detectType(pre.lines, pre.meta);
   var type = (opts.type && opts.type !== 'auto') ? opts.type : det.type;

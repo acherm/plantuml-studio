@@ -63,10 +63,10 @@ P.parseState = function (lines, meta) {
     }
 
     /* state declaration */
-    if ((m = new RegExp('^state\\s+(?:"([^"]+)"\\s+as\\s+(' + SNAME + ')|"([^"]+)"|(' + SNAME + '))\\s*(<<\\s*(choice|fork|join|end|start|entryPoint|exitPoint|history)\\s*>>)?\\s*(\\{)?\\s*$').exec(t))) {
+    if ((m = new RegExp('^state\\s+(?:"([^"]+)"\\s+as\\s+(' + SNAME + ')|"([^"]+)"|(' + SNAME + '))\\s*(<<\\s*(choice|fork|join|end|start|entryPoint|exitPoint|history)\\s*>>)?\\s*(\\{)?\\s*$', 'i').exec(t))) {
       var id = m[2] || m[3] || m[4];
       var label = m[1] || m[3] || m[4];
-      var stereo = m[6] || null;
+      var stereo = m[6] ? m[6].toLowerCase() : null;
       var ex = states.get(id);
       if (ex && !ex.implicit && !m[7]) D.push(P.d('warning', ln, "state '" + id + "' was already declared (line " + ex.line + ") — declarations merged"));
       var s = getState(id, ln, true);
@@ -250,8 +250,11 @@ P.renderState = function (model, M, meta) {
 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges, containers: containers,
+    overrides: meta && meta.posOverrides,
     dir: 'TB', gapNode: 46, gapRank: 62, gapComp: 56
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   lay.rects.forEach(function (rc, cid) {
@@ -300,11 +303,11 @@ P.renderState = function (model, M, meta) {
   model.states.forEach(function (s) {
     if (s.kind === 'composite') return;
     var p = lay.pos.get(s.id);
-    if (p) out += boxes.get(s.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(s.id, s.line, p.x, p.y, !containedIds.has(s.id), boxes.get(s.id).draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += boxes.get(n.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, boxes.get(n.id).draw(p.x, p.y));
   });
 
   return { body: out, w: lay.w + 60, h: lay.h + 8 };

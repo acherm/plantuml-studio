@@ -98,6 +98,62 @@ P.suggest = function (word, candidates) {
   return bestD <= 2 && word.length > 2 ? best : null;
 };
 
+/* ---------------- graphical-edit text transforms ----------------
+   The rendered SVG is a pure function of the text; dragging or renaming a
+   node in the diagram works by rewriting the text and recompiling — never
+   by mutating a separate in-memory model. Node positions persist as
+   `' @pos Id x,y` comment lines: ordinary PlantUML comments (ignored by
+   real PlantUML and by every parser here), read only by the layout stage
+   as a side-channel so manual placement survives a recompile. */
+
+/* Scans the RAW, unstripped text (independent of the normal
+   comment-stripping pass) so this works regardless of where the
+   `@pos` line ends up relative to @startuml/@enduml. */
+P.extractPosOverrides = function (text) {
+  var out = {};
+  var re = /^[ \t]*'[ \t]*@pos[ \t]+(\S+)[ \t]+(-?[\d.]+)[ \t]*,[ \t]*(-?[\d.]+)[ \t]*$/gm;
+  var m;
+  while ((m = re.exec(String(text == null ? '' : text)))) out[m[1]] = { x: parseFloat(m[2]), y: parseFloat(m[3]) };
+  return out;
+};
+
+P.upsertPosOverride = function (text, id, x, y) {
+  var lines = String(text == null ? '' : text).split(/\r\n|\r|\n/);
+  var idEsc = String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp("^[ \\t]*'[ \\t]*@pos[ \\t]+" + idEsc + "[ \\t]+-?[\\d.]+[ \\t]*,[ \\t]*-?[\\d.]+[ \\t]*$");
+  var newLine = "' @pos " + id + ' ' + Math.round(x) + ',' + Math.round(y);
+  for (var i = 0; i < lines.length; i++) {
+    if (re.test(lines[i])) { lines[i] = newLine; return lines.join('\n'); }
+  }
+  var insertAt = lines.length;
+  for (i = 0; i < lines.length; i++) { if (/^\s*@startuml\b/i.test(lines[i])) { insertAt = i + 1; break; } }
+  lines.splice(insertAt, 0, newLine);
+  return lines.join('\n');
+};
+
+/* Renames every unquoted, non-comment, word-boundary occurrence of oldId to
+   newId — leaves string-literal labels and whole-line comments untouched,
+   since those are free-form prose, not identifier references. */
+P.renameIdentifier = function (text, oldId, newId) {
+  text = String(text == null ? '' : text);
+  if (!oldId || !newId || oldId === newId) return { text: text };
+  if (!/^[A-Za-z_$][\w.$]*$/.test(newId)) {
+    return { error: 'A name must start with a letter or _ and contain only letters, digits, _ . $ — got "' + newId + '"' };
+  }
+  var re = new RegExp('\\b' + oldId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g');
+  var changed = false;
+  var out = text.split(/\r\n|\r|\n/).map(function (line) {
+    if (/^\s*'/.test(line)) return line;
+    var segs = line.split(/("[^"]*")/);
+    for (var i = 0; i < segs.length; i += 2) {
+      segs[i] = segs[i].replace(re, function () { changed = true; return newId; });
+    }
+    return segs.join('');
+  }).join('\n');
+  if (!changed) return { error: "'" + oldId + "' was not found in the document (as an unquoted identifier)." };
+  return { text: out };
+};
+
 /* ---------------- preprocessing ---------------- */
 /* Strips comments, handles @startuml/@enduml, consumes global directives.
    Returns {lines:[{n,text}], meta, diagnostics} */
@@ -150,22 +206,22 @@ P.preprocess = function (text) {
       continue;
     }
 
-    if (/^@startuml\b/.test(t)) {
+    if (/^@startuml\b/i.test(t)) {
       if (sawStart) { D.push(P.d('error', L.n, 'Multiple @startuml found — this editor renders one diagram per document; everything after this line is ignored')); break; }
       if (sawEnd) { D.push(P.d('error', L.n, '@startuml after @enduml — only one diagram per document')); break; }
       sawStart = true;
       if (lines.length) { D.push(P.d('warning', L.n, 'Content before @startuml is ignored by PlantUML')); lines = []; }
       continue;
     }
-    if (/^@start\w+/.test(t)) {
+    if (/^@start\w+/i.test(t)) {
       D.push(P.d('error', L.n, 'Only @startuml documents are supported (class, object, sequence, use case and state diagrams)'));
       continue;
     }
-    if (/^@enduml\b/.test(t)) {
+    if (/^@enduml\b/i.test(t)) {
       if (!sawStart) D.push(P.d('warning', L.n, '@enduml without a matching @startuml'));
       sawEnd = true; continue;
     }
-    if (/^@end\w+/.test(t)) { D.push(P.d('warning', L.n, 'Unexpected ' + t.split(/\s/)[0] + ' — expected @enduml')); sawEnd = true; continue; }
+    if (/^@end\w+/i.test(t)) { D.push(P.d('warning', L.n, 'Unexpected ' + t.split(/\s/)[0] + ' — expected @enduml')); sawEnd = true; continue; }
     if (sawEnd) {
       if (!afterEndWarned) { D.push(P.d('warning', L.n, 'Content after @enduml is ignored')); afterEndWarned = true; }
       continue;
@@ -174,31 +230,31 @@ P.preprocess = function (text) {
     /* inside a { } body: everything is content, never a global directive */
     if (contentDepth > 0) { pushContent(L); continue; }
 
-    /* global directives */
+    /* global directives (PlantUML keywords are case-insensitive; identifiers are not) */
     var m;
-    if ((m = /^title\s+(.+)$/.exec(t))) { meta.title = m[1]; continue; }
-    if (/^title$/.test(t)) { multiline = 'title'; continue; }
-    if (/^legend\b/.test(t)) { multiline = 'legend'; continue; }
-    if (/^(center\s+)?header\b\s*$/.test(t)) { multiline = 'header'; continue; }
-    if (/^(center\s+)?footer\b\s*$/.test(t)) { multiline = 'footer'; continue; }
-    if ((m = /^skinparam\b.*$/.exec(t))) {
+    if ((m = /^title\s+(.+)$/i.exec(t))) { meta.title = m[1]; continue; }
+    if (/^title$/i.test(t)) { multiline = 'title'; continue; }
+    if (/^legend\b/i.test(t)) { multiline = 'legend'; continue; }
+    if (/^(center\s+)?header\b\s*$/i.test(t)) { multiline = 'header'; continue; }
+    if (/^(center\s+)?footer\b\s*$/i.test(t)) { multiline = 'footer'; continue; }
+    if ((m = /^skinparam\b.*$/i.exec(t))) {
       skinDepth = (t.match(/\{/g) || []).length - (t.match(/\}/g) || []).length;
       if (skinDepth < 0) skinDepth = 0;
       continue;
     }
-    if (/^hide\s+footbox\b/.test(t)) { meta.hideFootbox = true; meta.scoreHints.sequence += 4; continue; }
-    if (/^(skin|scale|caption|header|footer|mainframe)\b/.test(t)) continue;
-    if (/^(hide|show|remove)\b/.test(t)) continue;
-    if (/^left\s+to\s+right\s+direction$/.test(t)) { meta.direction = 'LR'; continue; }
-    if (/^top\s+to\s+bottom\s+direction$/.test(t)) { meta.direction = 'TB'; continue; }
-    if (/^!pragma\b/.test(t)) continue;
-    if (/^!theme\b/.test(t)) { D.push(P.d('info', L.n, 'Themes are not supported in this offline editor — directive ignored')); continue; }
-    if (/^!(include|includesub|import|define|definelong|undef|function|procedure|endfunction|endprocedure|if|ifdef|ifndef|else|endif|while|endwhile|assert|log|dump_memory|startsub|endsub|\$?\w+\s*=)/.test(t)) {
+    if (/^hide\s+footbox\b/i.test(t)) { meta.hideFootbox = true; meta.scoreHints.sequence += 4; continue; }
+    if (/^(skin|scale|caption|header|footer|mainframe)\b/i.test(t)) continue;
+    if (/^(hide|show|remove)\b/i.test(t)) continue;
+    if (/^left\s+to\s+right\s+direction$/i.test(t)) { meta.direction = 'LR'; continue; }
+    if (/^top\s+to\s+bottom\s+direction$/i.test(t)) { meta.direction = 'TB'; continue; }
+    if (/^!pragma\b/i.test(t)) continue;
+    if (/^!theme\b/i.test(t)) { D.push(P.d('info', L.n, 'Themes are not supported in this offline editor — directive ignored')); continue; }
+    if (/^!(include|includesub|import|define|definelong|undef|function|procedure|endfunction|endprocedure|if|ifdef|ifndef|else|endif|while|endwhile|assert|log|dump_memory|startsub|endsub|\$?\w+\s*=)/i.test(t)) {
       D.push(P.d('warning', L.n, 'Preprocessor directives (!include, !define, …) are not supported — line ignored'));
       continue;
     }
-    if (/^newpage\b/.test(t)) { D.push(P.d('warning', L.n, 'newpage is not supported — line ignored')); continue; }
-    if (/^autoactivate\b/.test(t)) { D.push(P.d('warning', L.n, 'autoactivate is not supported — use activate/deactivate or ++/-- instead')); meta.scoreHints.sequence += 3; continue; }
+    if (/^newpage\b/i.test(t)) { D.push(P.d('warning', L.n, 'newpage is not supported — line ignored')); continue; }
+    if (/^autoactivate\b/i.test(t)) { D.push(P.d('warning', L.n, 'autoactivate is not supported — use activate/deactivate or ++/-- instead')); meta.scoreHints.sequence += 3; continue; }
 
     pushContent(L);
   }
@@ -223,23 +279,23 @@ P.detectType = function (lines, meta) {
   if (meta && meta.scoreHints) sc.sequence += meta.scoreHints.sequence || 0;
   for (var i = 0; i < lines.length; i++) {
     var t = lines[i].text;
-    if (/^(abstract\s+class|class|interface|annotation)\b/.test(t)) sc.class += 5;
-    if (/^enum\b/.test(t)) sc.class += 4;
-    if (/^package\b/.test(t)) sc.class += 1;
-    if (/^object\b/.test(t)) sc.object += 6;
-    if (/^map\b/.test(t)) sc.object += 4;
-    if (/^(participant|boundary|control|entity|database|collections|queue)\b/.test(t)) sc.sequence += 5;
-    if (/^(activate|deactivate|autonumber|destroy)\b/.test(t)) sc.sequence += 4;
-    if (/^return\b/.test(t)) sc.sequence += 3;
-    if (/^(alt|opt|loop|par|break|critical|group)\b/.test(t)) sc.sequence += 2;
+    if (/^(abstract\s+class|class|interface|annotation)\b/i.test(t)) sc.class += 5;
+    if (/^enum\b/i.test(t)) sc.class += 4;
+    if (/^package\b/i.test(t)) sc.class += 1;
+    if (/^object\b/i.test(t)) sc.object += 6;
+    if (/^map\b/i.test(t)) sc.object += 4;
+    if (/^(participant|boundary|control|entity|database|collections|queue)\b/i.test(t)) sc.sequence += 5;
+    if (/^(activate|deactivate|autonumber|destroy)\b/i.test(t)) sc.sequence += 4;
+    if (/^return\b/i.test(t)) sc.sequence += 3;
+    if (/^(alt|opt|loop|par|break|critical|group)\b/i.test(t)) sc.sequence += 2;
     if (/^==.*==$/.test(t)) sc.sequence += 2;
     if (/^\.\.\./.test(t)) sc.sequence += 1;
-    if (/^usecase\b/.test(t)) sc.usecase += 6;
-    if (/^rectangle\b/.test(t)) sc.usecase += 3;
-    if (/^actor\b/.test(t)) { sc.usecase += 2; sc.sequence += 2; }
+    if (/^usecase\b/i.test(t)) sc.usecase += 6;
+    if (/^rectangle\b/i.test(t)) sc.usecase += 3;
+    if (/^actor\b/i.test(t)) { sc.usecase += 2; sc.sequence += 2; }
     if (/\([^()]+\)/.test(t) && /(--|\.\.|->|\.>|<\.)/.test(t)) sc.usecase += 4;
     if (/^:[^:]+:\s/.test(t) || /\s:[^:]+:$/.test(t)) sc.usecase += 3;
-    if (/^state\b/.test(t)) sc.state += 6;
+    if (/^state\b/i.test(t)) sc.state += 6;
     if (/\[\*\]/.test(t)) sc.state += 5;
     /* sequence message: A -> B : text (also <-, dashed, and ++/-- activation modifiers) */
     if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*(?:[+\-*!]{1,4}\s*)?:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
@@ -419,6 +475,16 @@ S.anchor = function (n, tx, ty) {
   var sy = dy !== 0 ? (n.h / 2) / Math.abs(dy) : Infinity;
   var s = Math.min(sx, sy);
   return { x: cx + dx * s, y: cy + dy * s };
+};
+
+/* wraps a node's drawn SVG so the app layer can hit-test clicks/drags
+   against it — click-to-navigate works for any node; dragging only for
+   ones the layout actually allows overriding (see L.graph, top-level only) */
+S.wrapNode = function (id, line, x, y, draggable, inner) {
+  var a = '<g class="pu-node" data-node="' + P.esc(id) + '"';
+  if (line) a += ' data-line="' + line + '"';
+  a += ' data-x="' + P.r(x) + '" data-y="' + P.r(y) + '" data-draggable="' + (draggable ? '1' : '0') + '">';
+  return a + inner + '</g>';
 };
 
 P.svgDoc = function (w, h, body) {

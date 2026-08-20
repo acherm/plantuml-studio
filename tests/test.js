@@ -94,6 +94,19 @@ eq(det('@startuml\n[*] --> S1\nS1 --> [*]\n@enduml'), 'state', 'detect state');
   eq(errs(res).length, 0, 'extends/implements clean');
 }
 {
+  /* regression: extends/implements targets must stay implicit so a LATER
+     explicit declaration of the same name isn't rejected as a duplicate */
+  const res = P.compile('@startuml\ninterface I\nclass B extends A implements I\nclass A\n@enduml');
+  eq(errs(res).length, 0, "declaring the extends target after it's referenced is not a duplicate");
+  eq(res.model.byId.get('A').implicit, false, 'the later explicit declaration wins');
+}
+{
+  /* case-insensitivity: PlantUML keywords ignore case, identifiers do not */
+  const res = P.compile('@startuml\nInterface I\nClass B Extends A Implements I\nClass A\n@enduml');
+  eq(errs(res).length, 0, 'capitalized keywords (Class/Interface/Extends/Implements) parse cleanly');
+  eq(res.model.byId.get('A').kind, 'class', 'capitalized declarations still resolve the right kind');
+}
+{
   const res = P.compile('@startuml\nclass A\nclass B\nA "1" *-- "0..*" B : owns\n@enduml');
   const rel = res.model.relations[0];
   eq(rel.cardL, '1', 'left multiplicity');
@@ -121,6 +134,25 @@ eq(det('@startuml\n[*] --> S1\nS1 --> [*]\n@enduml'), 'state', 'detect state');
   eq(res.model.objects[0].fields.length, 2, 'fields via block and colon');
   svgSane(res, 'object');
 }
+{
+  /* the exact motivating example: capitalized "Object" + colon-style fields
+     with unquoted values (dates), links declared before their targets */
+  const res = P.compile([
+    '@startuml',
+    'Object Library {', 'name: "dummy"', 'address: "dummy"', '}', '',
+    'Object Bookone {', 'tittle: "not important"', 'pages: 10', 'release: 01/01/2001', '}', '',
+    'Object Author {', 'name: "dummy"', 'email: "dummy@dummy.com"', '}', '',
+    'Object Booktwo {', 'tittle: "not important"', 'pages: 20', 'release: 01/01/2001', '}', '',
+    'Object Bookthree {', 'tittle: "not important"', 'pages: 30', 'release: 01/01/2001', '}', '',
+    'Booktwo --> Author :wrote', 'Bookthree --> Author :wrote', 'Bookone --> Author :wrote', '',
+    'Library --> Bookone :has', 'Library --> Booktwo :has', 'Library --> Bookthree:has',
+    '@enduml'
+  ].join('\n'));
+  eq(res.type, 'object', 'capitalized "Object" is still detected as an object diagram');
+  eq(errs(res).length, 0, 'capitalized Object + colon fields parse cleanly');
+  eq(res.model.objects.length, 5, 'all five objects parsed');
+  svgSane(res, 'object-capitalized-library');
+}
 
 /* ---------- sequence diagrams ---------- */
 {
@@ -144,8 +176,17 @@ eq(det('@startuml\n[*] --> S1\nS1 --> [*]\n@enduml'), 'state', 'detect state');
   ok(has(res, 'warning', /return: no activation/), 'return without ++ activation warns');
 }
 {
+  /* regression: `activate X` as the very first statement must silently
+     auto-create X, exactly like a message's first mention does — real
+     PlantUML accepts this without complaint */
+  const res = P.compile('@startuml\nactivate A\nA -> B : x\ndeactivate A\n@enduml');
+  eq(errs(res).length, 0, 'activate as the first statement is not an error');
+  ok(res.model.byId.has('A'), 'the participant is created');
+}
+{
   const res = P.compile('@startuml\ndeactivate A\n@enduml');
-  ok(has(res, 'error', /has not appeared yet/), 'deactivate unknown participant');
+  ok(has(res, 'warning', /no active activation/), 'deactivate with nothing to deactivate warns (participants are auto-created silently, like a first message)');
+  eq(errs(res).length, 0, 'a lone deactivate is not an error — activate/deactivate/destroy auto-create their participant like a message does');
 }
 {
   const res = P.compile('@startuml\nautonumber\nA -> B : one\nA -> B : two\n@enduml');
@@ -331,6 +372,204 @@ P.EXAMPLES.forEach(ex => {
   const res = P.compile('@startuml\n[*] --> S\nS --> S : tick\n@enduml');
   svgSane(res, 'state self-transition (regression)');
   ok(res.svg.includes('tick'), 'state self-transition: label still rendered');
+}
+
+/* ---------- codegen: template engine ---------- */
+{
+  eq(P.tmplRender('Hello {{name}}!', { name: 'World' }), 'Hello World!', 'plain var interpolation');
+  eq(P.tmplRender('{{missing}}', {}), '', 'missing var renders empty');
+  eq(P.tmplRender('a{{#if x}}b{{/if}}c', { x: true }), 'abc', 'if true renders body');
+  eq(P.tmplRender('a{{#if x}}b{{/if}}c', { x: false }), 'ac', 'if false skips body');
+  eq(P.tmplRender('{{#if x}}yes{{else}}no{{/if}}', { x: false }), 'no', 'if/else picks else branch');
+  eq(P.tmplRender('{{#unless x}}yes{{/unless}}', { x: false }), 'yes', 'unless negates');
+  eq(P.tmplRender('{{#if !x}}yes{{/if}}', { x: false }), 'yes', 'leading ! negates an if condition');
+  eq(P.tmplRender('{{#each items}}[{{.}}]{{/each}}', { items: ['a', 'b'] }), '[a][b]', 'each over primitives via {{.}}');
+  eq(P.tmplRender('{{#each items}}{{name}}{{#unless @last}},{{/unless}}{{/each}}', { items: [{ name: 'x' }, { name: 'y' }] }), 'x,y', 'each over objects with @last');
+  eq(P.tmplRender('{{#each xs}}{{outer}}-{{.}} {{/each}}', { outer: 'O', xs: [1, 2] }), 'O-1 O-2 ', 'inner scope falls back to outer scope for unresolved names');
+  eq(P.tmplRender('{{#each a}}{{#each b}}{{x}}{{y}}{{/each}}{{/each}}',
+    { a: [{ b: [{ x: 1, y: 2 }] }] }), '12', 'nested each');
+  var standalone = P.tmplRender('before\n{{#if x}}\nmid\n{{/if}}\nafter', { x: true });
+  eq(standalone, 'before\nmid\nafter', 'standalone block tags consume their own line (no ragged blank lines)');
+}
+
+/* ---------- codegen: member signature parsing ---------- */
+{
+  var m1 = P.parseMemberSignature('speed: int');
+  eq(m1.isMethod, false, 'attribute detected');
+  eq(m1.name, 'speed', 'attribute name');
+  eq(m1.type, 'int', 'attribute type');
+  var m2 = P.parseMemberSignature('drive(m: Member, dist: int): Loan');
+  eq(m2.isMethod, true, 'method detected');
+  eq(m2.params.length, 2, 'method params count');
+  eq(m2.params[0].name, 'm', 'first param name');
+  eq(m2.returnType, 'Loan', 'method return type');
+  var m3 = P.parseMemberSignature('process(data: Map<String, Integer>): void');
+  eq(m3.params.length, 1, 'generic type with internal comma is not split (Map<String, Integer>)');
+  eq(m3.params[0].type, 'Map<String, Integer>', 'generic param type preserved whole');
+  var m4 = P.parseMemberSignature('count: int = 0');
+  eq(m4.defaultValue, '0', 'default value captured');
+  var m5 = P.parseMemberSignature('RED');
+  eq(m5.name, 'RED', 'bare enum literal parses as a name');
+}
+
+/* ---------- codegen: type mapping ---------- */
+{
+  eq(P.toPyType('int'), 'int', 'int -> int');
+  eq(P.toPyType('String'), 'str', 'String -> str');
+  eq(P.toPyType('boolean'), 'bool', 'boolean -> bool');
+  eq(P.toPyType('void'), 'None', 'void -> None');
+  eq(P.toPyType('List<Book>'), 'List[Book]', 'List<X> -> List[X]');
+  eq(P.toPyType('Map<String, Integer>'), 'Dict[str, int]', 'Map<K,V> -> Dict[K, V]');
+  eq(P.camelToSnake('createLoan'), 'create_loan', 'camelCase -> snake_case');
+  eq(P.camelToSnake('checkOutBook'), 'check_out_book', 'multi-word camelCase -> snake_case');
+}
+
+/* ---------- codegen: Java & Python generation ---------- */
+var CODEGEN_LIBRARY = [
+  '@startuml',
+  'interface Borrowable {', '  +checkOut(m: Member): Loan', '  +return(): void', '}',
+  'abstract class Media {', '  #title: String', '  #year: int', '  +{abstract} describe(): String', '}',
+  'class Book extends Media implements Borrowable {', '  -isbn: String', '  -pages: int', '  +describe(): String', '}',
+  'enum Genre {', '  NOVEL', '  ESSAY', '}',
+  'class Library {', '  -name: String', '  +register(m: Member): void', '}',
+  'class Foo {', '  -class: int', '  +import(): void', '}',
+  '@enduml'
+].join('\n');
+{
+  const res = P.compile(CODEGEN_LIBRARY, { type: 'class' });
+  eq(errs(res).length, 0, 'codegen source diagram is itself well-formed');
+
+  const gm = P.classGenModel(res.model);
+  eq(gm.classes.length, 6, 'one gen-model entry per top-level class/interface/enum');
+  const book = gm.classes.filter(c => c.name === 'Book')[0];
+  eq(book.superclass, 'Media', "Book's superclass resolved");
+  eq(book.interfaces[0], 'Borrowable', "Book's interface resolved");
+  ok(book.methods.some(m => m.name === 'checkOut'), 'Book gains an inherited-interface stub for checkOut');
+  ok(book.methods.some(m => m.name === 'return_'), 'the stub for a reserved-word method name is itself escaped');
+  ok(!book.methods.find(m => m.name === 'checkOut').bodiless, 'the injected stub has a body (bodiless=false)');
+  eq(book.javaCtorParamsStr, 'String title, int year, String isbn, int pages', "Book's constructor threads Media's fields first, then its own");
+  ok(book.hasSuperCtorArgs, 'Book must call super(...)');
+  eq(book.superCallArgsStr, 'title, year', 'super(...) call forwards exactly the inherited fields');
+
+  const foo = gm.classes.filter(c => c.name === 'Foo')[0];
+  eq(foo.attributes[0].name, 'class_', "a Java-reserved attribute name ('class') is escaped");
+  eq(foo.methods[0].name, 'import_', "a Java-reserved method name ('import') is escaped");
+
+  const java = P.genCode(res.model, P.JAVA_TEMPLATE, 'java');
+  eq(java.length, 6, 'one Java file per class');
+  const bookJava = java.filter(f => f.className === 'Book')[0];
+  ok(bookJava.code.includes('super(title, year);'), 'Book.java calls super(title, year)');
+  ok(bookJava.code.includes('public Loan checkOut(Member m)'), 'Book.java implements the interface method');
+  ok(bookJava.code.includes('public void return_()'), 'Book.java uses the escaped name for the reserved word');
+  ok(!/\{\{|\}\}/.test(bookJava.code), 'no leftover template markers in Java output');
+  const braceBalance = (bookJava.code.match(/\{/g) || []).length - (bookJava.code.match(/\}/g) || []).length;
+  eq(braceBalance, 0, 'Book.java has balanced braces');
+
+  const py = P.genCode(res.model, P.PYTHON_TEMPLATE, 'python');
+  eq(py.length, 6, 'one Python file per class');
+  const bookPy = py.filter(f => f.className === 'Book')[0];
+  eq(bookPy.filename, 'book.py', 'Python filename is snake_case');
+  ok(bookPy.code.includes('class Book(Media, Borrowable):'), 'book.py declares both bases');
+  ok(bookPy.code.includes('from media import Media'), 'book.py imports its superclass');
+  ok(bookPy.code.includes('from borrowable import Borrowable'), 'book.py imports its interface');
+  ok(bookPy.code.includes('super().__init__(title, year)'), 'book.py chains to the superclass constructor');
+  ok(!/\{\{|\}\}/.test(bookPy.code), 'no leftover template markers in Python output');
+  const mediaPy = py.filter(f => f.className === 'Media')[0];
+  ok(mediaPy.code.includes('from abc import ABC, abstractmethod'), 'media.py (abstract class) imports ABC');
+  ok(mediaPy.code.includes('class Media(ABC):'), 'media.py actually derives from ABC, or @abstractmethod is a no-op');
+  const genrePy = py.filter(f => f.className === 'Genre')[0];
+  ok(genrePy.code.includes('from enum import Enum, auto') && genrePy.code.includes('NOVEL = auto()'), 'genre.py is a proper Python Enum');
+}
+{
+  /* the generator must never throw on any of the corpus / examples, even
+     though it only makes sense for class diagrams */
+  P.EXAMPLES.forEach(ex => {
+    const res = P.compile(ex.code, { strict: true });
+    if (res.type !== 'class' || !res.model) return;
+    try {
+      P.genCode(res.model, P.JAVA_TEMPLATE, 'java');
+      P.genCode(res.model, P.PYTHON_TEMPLATE, 'python');
+      pass++;
+    } catch (e) { fail++; console.error('FAIL: codegen threw on ' + ex.name + ': ' + e.message); }
+  });
+}
+
+/* ---------- graphical editing: text-surgical transforms ---------- */
+{
+  const r1 = P.renameIdentifier('@startuml\nclass Car\nCar --> Wheel\n@enduml', 'Car', 'Vehicle');
+  ok(!r1.error, 'rename succeeds when the identifier exists');
+  eq(r1.text, '@startuml\nclass Vehicle\nVehicle --> Wheel\n@enduml', 'rename replaces the declaration and every reference');
+
+  const r2 = P.renameIdentifier('@startuml\nclass A\nnote right of A : "A" says hello\n@enduml', 'A', 'B');
+  ok(r2.text.includes('note right of B : "A" says hello'), 'rename touches the unquoted reference but leaves the quoted label text untouched');
+
+  const r3 = P.renameIdentifier("@startuml\n' this mentions A in prose\nclass A\n@enduml", 'A', 'B');
+  ok(r3.text.includes("' this mentions A in prose"), 'rename leaves whole-line comments untouched');
+  ok(r3.text.includes('class B'), 'rename still applies to the real declaration');
+
+  const r4 = P.renameIdentifier('@startuml\nclass A\n@enduml', 'A', 'not valid!');
+  ok(!!r4.error, 'rename rejects a new name that is not a valid identifier');
+
+  const r5 = P.renameIdentifier('@startuml\nclass A\n@enduml', 'Zzz', 'B');
+  ok(!!r5.error, 'rename reports when the old identifier is not found');
+
+  const r6 = P.renameIdentifier('@startuml\nclass Foobar\n@enduml', 'Foo', 'Baz');
+  ok(!!r6.error, 'rename does not match a substring of a longer identifier (word boundary)');
+}
+{
+  const empty = P.extractPosOverrides('@startuml\nclass A\n@enduml');
+  eq(Object.keys(empty).length, 0, 'no @pos lines -> no overrides');
+
+  const one = P.extractPosOverrides("@startuml\nclass A\n' @pos A 120,45.5\n@enduml");
+  eq(one.A.x, 120, '@pos x parsed');
+  eq(one.A.y, 45.5, '@pos y parsed (decimal)');
+
+  const withInsert = P.upsertPosOverride('@startuml\nclass A\n@enduml', 'A', 10, 20);
+  ok(withInsert.includes("' @pos A 10,20"), 'upsert inserts a new @pos line');
+  ok(/^@startuml$/m.test(withInsert.split('\n')[0]), 'upsert keeps @startuml as the first line');
+
+  const updated = P.upsertPosOverride(withInsert, 'A', 30, 40);
+  const again = P.extractPosOverrides(updated);
+  eq(again.A.x, 30, 'upsert on an existing id replaces it in place (x)');
+  eq(again.A.y, 40, 'upsert on an existing id replaces it in place (y)');
+  eq((updated.match(/@pos A/g) || []).length, 1, 'upsert never duplicates the line for the same id');
+}
+
+/* ---------- graphical editing: SVG hit-test markup + drag persistence ---------- */
+{
+  const res = P.compile('@startuml\nclass A\nclass B\nA --> B\n@enduml');
+  ok(/data-node="A"[^>]*data-line="2"/.test(res.svg), 'class node A carries data-node + its declaration line');
+  ok(/data-draggable="1"/.test(res.svg), 'a top-level class is marked draggable');
+}
+{
+  const res = P.compile('@startuml\npackage P {\n  class A\n}\nclass B\nA --> B\n@enduml');
+  const gA = /<g class="pu-node" data-node="A"[^>]*>/.exec(res.svg)[0];
+  ok(gA.includes('data-draggable="0"'), 'a class inside a package is not draggable in this version');
+  const gB = /<g class="pu-node" data-node="B"[^>]*>/.exec(res.svg)[0];
+  ok(gB.includes('data-draggable="1"'), 'a top-level class next to a package is still draggable');
+}
+{
+  const res = P.compile("@startuml\nclass A\nclass B\nA --> B\n' @pos B 500,500\n@enduml");
+  eq(errs(res).length, 0, 'a @pos comment line does not affect validity');
+  const gB = /<g class="pu-node" data-node="B"[^>]*>/.exec(res.svg)[0];
+  const x = +/data-x="([\d.]+)"/.exec(gB)[1], y = +/data-y="([\d.]+)"/.exec(gB)[1];
+  ok(Math.abs(x - 500) < 2 && Math.abs(y - 500) < 2, 'the overridden node is actually placed at the requested position (got ' + x + ',' + y + ')');
+  ok(res.width > 500 && res.height > 500, 'the SVG bounding box grows to fit a manually-dragged-far node');
+  svgSane(res, 'class with position override');
+}
+{
+  /* dragging must never throw, even for edge cases the layout wasn't
+     designed around (unknown id, negative coordinates, sequence diagrams
+     which do not support dragging at all) */
+  const cases = [
+    "@startuml\nclass A\n' @pos Nope 10,10\n@enduml",
+    "@startuml\nclass A\n' @pos A -300,-300\n@enduml",
+    "@startuml\nAlice -> Bob : hi\n' @pos Alice 10,10\n@enduml"
+  ];
+  cases.forEach((c, i) => {
+    try { const r = P.compile(c, { strict: true }); svgSane(r, 'drag-edge-case-' + i); }
+    catch (e) { fail++; console.error('FAIL: drag edge case ' + i + ' threw: ' + e.message); }
+  });
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

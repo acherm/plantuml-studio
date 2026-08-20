@@ -539,6 +539,22 @@ select.btn { padding: 7px 8px; }
 }
 .viewport svg { display: block; box-shadow: 0 2px 14px rgba(60, 60, 30, 0.14); border-radius: 3px; }
 .canvas.invalid .viewport { opacity: 0.45; filter: saturate(0.6); transition: opacity 0.2s; }
+.pu-node { cursor: pointer; }
+.pu-node[data-draggable="1"] { cursor: grab; }
+.pu-node.pu-dragging { cursor: grabbing; }
+.pu-node.pu-selected > * { filter: drop-shadow(0 0 2.5px var(--accent)) drop-shadow(0 0 2.5px var(--accent)); }
+.pu-rename-input {
+  position: fixed;
+  z-index: 200;
+  font: 600 13px 'IBM Plex Sans', sans-serif;
+  padding: 2px 6px;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+  box-shadow: var(--shadow);
+}
 .placeholder {
   position: absolute;
   inset: 0;
@@ -697,6 +713,71 @@ select.btn { padding: 7px 8px; }
 }
 .modal-note { font-size: 12px; color: var(--muted); margin-top: 16px; line-height: 1.6; }
 
+/* code generation modal */
+.codegen-box { width: min(1100px, 96vw); height: min(88vh, 760px); max-height: min(88vh, 760px); }
+.codegen-body {
+  display: flex;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  background: var(--border);
+}
+.codegen-col { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--surface); }
+.codegen-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.mini-btn {
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 11.5px 'IBM Plex Sans', sans-serif;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+#codeFileSelect {
+  margin-right: auto;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--ink);
+  font: 12px 'IBM Plex Mono', monospace;
+  padding: 3px 6px;
+  border-radius: 6px;
+  max-width: 55%;
+}
+.codegen-textarea {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  resize: none;
+  padding: 10px 12px;
+  font: 12.5px/1.55 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+  background: var(--surface2);
+  color: var(--ink);
+  outline: none;
+  white-space: pre;
+  overflow: auto;
+}
+.codegen-output { background: var(--surface); cursor: text; }
+.codegen-note {
+  padding: 8px 18px;
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .codegen-box { width: 96vw; height: 92vh; max-height: 92vh; }
+  .codegen-body { flex-direction: column; }
+}
+
 /* toast */
 .toast {
   position: fixed;
@@ -756,6 +837,7 @@ select.btn { padding: 7px 8px; }
         <option value="state">State</option>
       </select>
       <button id="btnHelp" class="btn">Syntax help</button>
+      <button id="btnCode" class="btn" title="Generate Java or Python from the current class diagram">Code</button>
       <span class="vr"></span>
       <button id="btnCopy" class="btn" title="Copy the PlantUML source">Copy code</button>
       <button id="btnSvg" class="btn" title="Download the diagram as SVG">SVG</button>
@@ -831,6 +913,37 @@ select.btn { padding: 7px 8px; }
     </div>
   </div>
   <div class="etip hidden" id="etip" role="tooltip"></div>
+
+  <div id="codeModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Generate code">
+    <div class="modal-box codegen-box">
+      <div class="modal-head">
+        <h2>Generate code</h2>
+        <div class="modal-tabs" id="codeLangTabs">
+          <button data-lang="java" class="on">Java</button>
+          <button data-lang="python">Python</button>
+        </div>
+        <button class="modal-close" id="codeModalClose" title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="codegen-body">
+        <div class="codegen-col">
+          <div class="codegen-col-head">
+            <span>Template — edit freely, it regenerates live</span>
+            <button class="mini-btn" id="codeResetTemplate" title="Reset to the default template">Reset</button>
+          </div>
+          <textarea id="codeTemplateEditor" class="codegen-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Code template"></textarea>
+        </div>
+        <div class="codegen-col">
+          <div class="codegen-col-head">
+            <select id="codeFileSelect" aria-label="Generated file"></select>
+            <button class="mini-btn" id="codeCopyBtn">Copy</button>
+            <button class="mini-btn" id="codeDownloadBtn">Download</button>
+          </div>
+          <textarea id="codeOutput" class="codegen-textarea codegen-output" readonly spellcheck="false" wrap="off" aria-label="Generated code"></textarea>
+        </div>
+      </div>
+      <div class="codegen-note" id="codeNote"></div>
+    </div>
+  </div>
 </div>
 <script>
 /* PlantUML Studio — core: preprocessing, diagnostics, shared parsing & SVG utils.
@@ -933,6 +1046,62 @@ P.suggest = function (word, candidates) {
   return bestD <= 2 && word.length > 2 ? best : null;
 };
 
+/* ---------------- graphical-edit text transforms ----------------
+   The rendered SVG is a pure function of the text; dragging or renaming a
+   node in the diagram works by rewriting the text and recompiling — never
+   by mutating a separate in-memory model. Node positions persist as
+   `' @pos Id x,y` comment lines: ordinary PlantUML comments (ignored by
+   real PlantUML and by every parser here), read only by the layout stage
+   as a side-channel so manual placement survives a recompile. */
+
+/* Scans the RAW, unstripped text (independent of the normal
+   comment-stripping pass) so this works regardless of where the
+   `@pos` line ends up relative to @startuml/@enduml. */
+P.extractPosOverrides = function (text) {
+  var out = {};
+  var re = /^[ \t]*'[ \t]*@pos[ \t]+(\S+)[ \t]+(-?[\d.]+)[ \t]*,[ \t]*(-?[\d.]+)[ \t]*$/gm;
+  var m;
+  while ((m = re.exec(String(text == null ? '' : text)))) out[m[1]] = { x: parseFloat(m[2]), y: parseFloat(m[3]) };
+  return out;
+};
+
+P.upsertPosOverride = function (text, id, x, y) {
+  var lines = String(text == null ? '' : text).split(/\r\n|\r|\n/);
+  var idEsc = String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp("^[ \\t]*'[ \\t]*@pos[ \\t]+" + idEsc + "[ \\t]+-?[\\d.]+[ \\t]*,[ \\t]*-?[\\d.]+[ \\t]*$");
+  var newLine = "' @pos " + id + ' ' + Math.round(x) + ',' + Math.round(y);
+  for (var i = 0; i < lines.length; i++) {
+    if (re.test(lines[i])) { lines[i] = newLine; return lines.join('\n'); }
+  }
+  var insertAt = lines.length;
+  for (i = 0; i < lines.length; i++) { if (/^\s*@startuml\b/i.test(lines[i])) { insertAt = i + 1; break; } }
+  lines.splice(insertAt, 0, newLine);
+  return lines.join('\n');
+};
+
+/* Renames every unquoted, non-comment, word-boundary occurrence of oldId to
+   newId — leaves string-literal labels and whole-line comments untouched,
+   since those are free-form prose, not identifier references. */
+P.renameIdentifier = function (text, oldId, newId) {
+  text = String(text == null ? '' : text);
+  if (!oldId || !newId || oldId === newId) return { text: text };
+  if (!/^[A-Za-z_$][\w.$]*$/.test(newId)) {
+    return { error: 'A name must start with a letter or _ and contain only letters, digits, _ . $ — got "' + newId + '"' };
+  }
+  var re = new RegExp('\\b' + oldId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g');
+  var changed = false;
+  var out = text.split(/\r\n|\r|\n/).map(function (line) {
+    if (/^\s*'/.test(line)) return line;
+    var segs = line.split(/("[^"]*")/);
+    for (var i = 0; i < segs.length; i += 2) {
+      segs[i] = segs[i].replace(re, function () { changed = true; return newId; });
+    }
+    return segs.join('');
+  }).join('\n');
+  if (!changed) return { error: "'" + oldId + "' was not found in the document (as an unquoted identifier)." };
+  return { text: out };
+};
+
 /* ---------------- preprocessing ---------------- */
 /* Strips comments, handles @startuml/@enduml, consumes global directives.
    Returns {lines:[{n,text}], meta, diagnostics} */
@@ -985,22 +1154,22 @@ P.preprocess = function (text) {
       continue;
     }
 
-    if (/^@startuml\b/.test(t)) {
+    if (/^@startuml\b/i.test(t)) {
       if (sawStart) { D.push(P.d('error', L.n, 'Multiple @startuml found — this editor renders one diagram per document; everything after this line is ignored')); break; }
       if (sawEnd) { D.push(P.d('error', L.n, '@startuml after @enduml — only one diagram per document')); break; }
       sawStart = true;
       if (lines.length) { D.push(P.d('warning', L.n, 'Content before @startuml is ignored by PlantUML')); lines = []; }
       continue;
     }
-    if (/^@start\w+/.test(t)) {
+    if (/^@start\w+/i.test(t)) {
       D.push(P.d('error', L.n, 'Only @startuml documents are supported (class, object, sequence, use case and state diagrams)'));
       continue;
     }
-    if (/^@enduml\b/.test(t)) {
+    if (/^@enduml\b/i.test(t)) {
       if (!sawStart) D.push(P.d('warning', L.n, '@enduml without a matching @startuml'));
       sawEnd = true; continue;
     }
-    if (/^@end\w+/.test(t)) { D.push(P.d('warning', L.n, 'Unexpected ' + t.split(/\s/)[0] + ' — expected @enduml')); sawEnd = true; continue; }
+    if (/^@end\w+/i.test(t)) { D.push(P.d('warning', L.n, 'Unexpected ' + t.split(/\s/)[0] + ' — expected @enduml')); sawEnd = true; continue; }
     if (sawEnd) {
       if (!afterEndWarned) { D.push(P.d('warning', L.n, 'Content after @enduml is ignored')); afterEndWarned = true; }
       continue;
@@ -1009,31 +1178,31 @@ P.preprocess = function (text) {
     /* inside a { } body: everything is content, never a global directive */
     if (contentDepth > 0) { pushContent(L); continue; }
 
-    /* global directives */
+    /* global directives (PlantUML keywords are case-insensitive; identifiers are not) */
     var m;
-    if ((m = /^title\s+(.+)$/.exec(t))) { meta.title = m[1]; continue; }
-    if (/^title$/.test(t)) { multiline = 'title'; continue; }
-    if (/^legend\b/.test(t)) { multiline = 'legend'; continue; }
-    if (/^(center\s+)?header\b\s*$/.test(t)) { multiline = 'header'; continue; }
-    if (/^(center\s+)?footer\b\s*$/.test(t)) { multiline = 'footer'; continue; }
-    if ((m = /^skinparam\b.*$/.exec(t))) {
+    if ((m = /^title\s+(.+)$/i.exec(t))) { meta.title = m[1]; continue; }
+    if (/^title$/i.test(t)) { multiline = 'title'; continue; }
+    if (/^legend\b/i.test(t)) { multiline = 'legend'; continue; }
+    if (/^(center\s+)?header\b\s*$/i.test(t)) { multiline = 'header'; continue; }
+    if (/^(center\s+)?footer\b\s*$/i.test(t)) { multiline = 'footer'; continue; }
+    if ((m = /^skinparam\b.*$/i.exec(t))) {
       skinDepth = (t.match(/\{/g) || []).length - (t.match(/\}/g) || []).length;
       if (skinDepth < 0) skinDepth = 0;
       continue;
     }
-    if (/^hide\s+footbox\b/.test(t)) { meta.hideFootbox = true; meta.scoreHints.sequence += 4; continue; }
-    if (/^(skin|scale|caption|header|footer|mainframe)\b/.test(t)) continue;
-    if (/^(hide|show|remove)\b/.test(t)) continue;
-    if (/^left\s+to\s+right\s+direction$/.test(t)) { meta.direction = 'LR'; continue; }
-    if (/^top\s+to\s+bottom\s+direction$/.test(t)) { meta.direction = 'TB'; continue; }
-    if (/^!pragma\b/.test(t)) continue;
-    if (/^!theme\b/.test(t)) { D.push(P.d('info', L.n, 'Themes are not supported in this offline editor — directive ignored')); continue; }
-    if (/^!(include|includesub|import|define|definelong|undef|function|procedure|endfunction|endprocedure|if|ifdef|ifndef|else|endif|while|endwhile|assert|log|dump_memory|startsub|endsub|\$?\w+\s*=)/.test(t)) {
+    if (/^hide\s+footbox\b/i.test(t)) { meta.hideFootbox = true; meta.scoreHints.sequence += 4; continue; }
+    if (/^(skin|scale|caption|header|footer|mainframe)\b/i.test(t)) continue;
+    if (/^(hide|show|remove)\b/i.test(t)) continue;
+    if (/^left\s+to\s+right\s+direction$/i.test(t)) { meta.direction = 'LR'; continue; }
+    if (/^top\s+to\s+bottom\s+direction$/i.test(t)) { meta.direction = 'TB'; continue; }
+    if (/^!pragma\b/i.test(t)) continue;
+    if (/^!theme\b/i.test(t)) { D.push(P.d('info', L.n, 'Themes are not supported in this offline editor — directive ignored')); continue; }
+    if (/^!(include|includesub|import|define|definelong|undef|function|procedure|endfunction|endprocedure|if|ifdef|ifndef|else|endif|while|endwhile|assert|log|dump_memory|startsub|endsub|\$?\w+\s*=)/i.test(t)) {
       D.push(P.d('warning', L.n, 'Preprocessor directives (!include, !define, …) are not supported — line ignored'));
       continue;
     }
-    if (/^newpage\b/.test(t)) { D.push(P.d('warning', L.n, 'newpage is not supported — line ignored')); continue; }
-    if (/^autoactivate\b/.test(t)) { D.push(P.d('warning', L.n, 'autoactivate is not supported — use activate/deactivate or ++/-- instead')); meta.scoreHints.sequence += 3; continue; }
+    if (/^newpage\b/i.test(t)) { D.push(P.d('warning', L.n, 'newpage is not supported — line ignored')); continue; }
+    if (/^autoactivate\b/i.test(t)) { D.push(P.d('warning', L.n, 'autoactivate is not supported — use activate/deactivate or ++/-- instead')); meta.scoreHints.sequence += 3; continue; }
 
     pushContent(L);
   }
@@ -1058,23 +1227,23 @@ P.detectType = function (lines, meta) {
   if (meta && meta.scoreHints) sc.sequence += meta.scoreHints.sequence || 0;
   for (var i = 0; i < lines.length; i++) {
     var t = lines[i].text;
-    if (/^(abstract\s+class|class|interface|annotation)\b/.test(t)) sc.class += 5;
-    if (/^enum\b/.test(t)) sc.class += 4;
-    if (/^package\b/.test(t)) sc.class += 1;
-    if (/^object\b/.test(t)) sc.object += 6;
-    if (/^map\b/.test(t)) sc.object += 4;
-    if (/^(participant|boundary|control|entity|database|collections|queue)\b/.test(t)) sc.sequence += 5;
-    if (/^(activate|deactivate|autonumber|destroy)\b/.test(t)) sc.sequence += 4;
-    if (/^return\b/.test(t)) sc.sequence += 3;
-    if (/^(alt|opt|loop|par|break|critical|group)\b/.test(t)) sc.sequence += 2;
+    if (/^(abstract\s+class|class|interface|annotation)\b/i.test(t)) sc.class += 5;
+    if (/^enum\b/i.test(t)) sc.class += 4;
+    if (/^package\b/i.test(t)) sc.class += 1;
+    if (/^object\b/i.test(t)) sc.object += 6;
+    if (/^map\b/i.test(t)) sc.object += 4;
+    if (/^(participant|boundary|control|entity|database|collections|queue)\b/i.test(t)) sc.sequence += 5;
+    if (/^(activate|deactivate|autonumber|destroy)\b/i.test(t)) sc.sequence += 4;
+    if (/^return\b/i.test(t)) sc.sequence += 3;
+    if (/^(alt|opt|loop|par|break|critical|group)\b/i.test(t)) sc.sequence += 2;
     if (/^==.*==$/.test(t)) sc.sequence += 2;
     if (/^\.\.\./.test(t)) sc.sequence += 1;
-    if (/^usecase\b/.test(t)) sc.usecase += 6;
-    if (/^rectangle\b/.test(t)) sc.usecase += 3;
-    if (/^actor\b/.test(t)) { sc.usecase += 2; sc.sequence += 2; }
+    if (/^usecase\b/i.test(t)) sc.usecase += 6;
+    if (/^rectangle\b/i.test(t)) sc.usecase += 3;
+    if (/^actor\b/i.test(t)) { sc.usecase += 2; sc.sequence += 2; }
     if (/\([^()]+\)/.test(t) && /(--|\.\.|->|\.>|<\.)/.test(t)) sc.usecase += 4;
     if (/^:[^:]+:\s/.test(t) || /\s:[^:]+:$/.test(t)) sc.usecase += 3;
-    if (/^state\b/.test(t)) sc.state += 6;
+    if (/^state\b/i.test(t)) sc.state += 6;
     if (/\[\*\]/.test(t)) sc.state += 5;
     /* sequence message: A -> B : text (also <-, dashed, and ++/-- activation modifiers) */
     if (/^[^\s:<>-]+\s*(?:x|o)?(?:<{1,2})?-{1,2}(?:>{1,2})?(?:x|o)?\s*[^\s:<>-]+\s*(?:[+\-*!]{1,4}\s*)?:\s*\S/.test(t) && /[<>]/.test(t)) sc.sequence += 3;
@@ -1254,6 +1423,16 @@ S.anchor = function (n, tx, ty) {
   var sy = dy !== 0 ? (n.h / 2) / Math.abs(dy) : Infinity;
   var s = Math.min(sx, sy);
   return { x: cx + dx * s, y: cy + dy * s };
+};
+
+/* wraps a node's drawn SVG so the app layer can hit-test clicks/drags
+   against it — click-to-navigate works for any node; dragging only for
+   ones the layout actually allows overriding (see L.graph, top-level only) */
+S.wrapNode = function (id, line, x, y, draggable, inner) {
+  var a = '<g class="pu-node" data-node="' + P.esc(id) + '"';
+  if (line) a += ' data-line="' + line + '"';
+  a += ' data-x="' + P.r(x) + '" data-y="' + P.r(y) + '" data-draggable="' + (draggable ? '1' : '0') + '">';
+  return a + inner + '</g>';
 };
 
 P.svgDoc = function (w, h, body) {
@@ -1529,7 +1708,36 @@ L.graph = function (spec) {
     }
   }
   lay0.pos.forEach(function (p2, id) { place(id, p2.x, p2.y); });
-  return { pos: abs, rects: rects, w: lay0.w, h: lay0.h };
+
+  var w = lay0.w, h = lay0.h;
+  var overrides = spec.overrides;
+  if (overrides) {
+    /* only top-level nodes can be manually repositioned (v1 limitation —
+       a node inside a package/boundary/composite state stays auto-placed) */
+    Object.keys(overrides).forEach(function (id) {
+      if (abs.has(id) && !parentOf.has(id)) abs.set(id, { x: overrides[id].x, y: overrides[id].y });
+    });
+    var minX = 0, minY = 0, maxX = 0, maxY = 0, any = false;
+    abs.forEach(function (p2, id) {
+      var n = nodeById.get(id); if (!n) return;
+      any = true;
+      minX = Math.min(minX, p2.x); minY = Math.min(minY, p2.y);
+      maxX = Math.max(maxX, p2.x + n.w); maxY = Math.max(maxY, p2.y + n.h);
+    });
+    rects.forEach(function (rc) {
+      any = true;
+      minX = Math.min(minX, rc.x); minY = Math.min(minY, rc.y);
+      maxX = Math.max(maxX, rc.x + rc.w); maxY = Math.max(maxY, rc.y + rc.h);
+    });
+    if (any && (minX < 0 || minY < 0)) {
+      var dx = -Math.min(0, minX), dy = -Math.min(0, minY);
+      abs.forEach(function (p2, id) { abs.set(id, { x: p2.x + dx, y: p2.y + dy }); });
+      rects.forEach(function (rc, id) { rects.set(id, { x: rc.x + dx, y: rc.y + dy, w: rc.w, h: rc.h }); });
+      maxX += dx; maxY += dy;
+    }
+    if (any) { w = Math.max(w, maxX); h = Math.max(h, maxY); }
+  }
+  return { pos: abs, rects: rects, w: w, h: h };
 };
 
 /* ---------- shared edge drawing between laid-out nodes ---------- */
@@ -1654,10 +1862,15 @@ P.parseClass = function (lines, meta) {
   function getClass(id, ln, kind) {
     var c = classes.get(id);
     if (!c) {
-      c = { id: id, display: id, kind: kind || 'class', stereo: null, generics: null,
-            members: [], line: ln, implicit: !kind, pkg: curPkg() ? curPkg().id : null };
+      /* always implicit here — even when a relation hints at a kind (e.g. an
+         implements target is presumably an interface), the user never wrote
+         an actual declaration, so a later explicit one must still be able
+         to claim this id without triggering a "declared twice" error */
+      var guessedKind = kind || 'class';
+      c = { id: id, display: id, kind: guessedKind, stereo: null, generics: null,
+            members: [], line: ln, implicit: true, pkg: curPkg() ? curPkg().id : null };
       classes.set(id, c); order.push(c);
-      if (!kind) D.push(P.d('info', ln, "'" + id + "' is not declared — implicitly created as a class"));
+      D.push(P.d('info', ln, "'" + id + "' is not declared — implicitly created as " + (guessedKind === 'interface' ? 'an interface' : 'a class')));
       if (curPkg()) curPkg().members.push(id);
     }
     return c;
@@ -1719,7 +1932,7 @@ P.parseClass = function (lines, meta) {
 
     if (cur) {
       /* a new declaration inside an open body ⇒ a '}' is missing above */
-      if (/^(abstract\s+class|abstract\s|class\s|interface\s|enum\s|annotation\s|entity\s|struct\s|package\s|namespace\s|object\s)/.test(t)) {
+      if (/^(abstract\s+class|abstract\s|class\s|interface\s|enum\s|annotation\s|entity\s|struct\s|package\s|namespace\s|object\s)/i.test(t)) {
         D.push(P.d('error', ln, "Declaration inside the body of '" + cur.id + "' — did you forget '}' before this line? (block opened at line " + curOpenLine + ')'));
         cur = null;
         i--; /* reprocess this line as a top-level statement */
@@ -1733,7 +1946,7 @@ P.parseClass = function (lines, meta) {
     }
 
     /* package / namespace */
-    if ((m = /^(?:package|namespace)\s+(?:"([^"]+)"|([\w.$]+))(?:\s+<<[^>]*>>)?(?:\s+#\S+)?\s*(\{)?\s*$/.exec(t))) {
+    if ((m = /^(?:package|namespace)\s+(?:"([^"]+)"|([\w.$]+))(?:\s+<<[^>]*>>)?(?:\s+#\S+)?\s*(\{)?\s*$/i.exec(t))) {
       var pname = m[1] || m[2];
       var pkg = { id: '@pkg' + packages.length + ':' + pname, label: pname, members: [], line: ln, parent: curPkg() ? curPkg().id : null };
       packages.push(pkg);
@@ -1744,8 +1957,8 @@ P.parseClass = function (lines, meta) {
     }
 
     /* declaration */
-    if ((m = /^(abstract\s+class|abstract|class|interface|enum|annotation|entity|struct)\s+(.+)$/.exec(t))) {
-      var kind = KINDMAP[m[1].replace(/\s+/g, ' ')];
+    if ((m = /^(abstract\s+class|abstract|class|interface|enum|annotation|entity|struct)\s+(.+)$/i.exec(t))) {
+      var kind = KINDMAP[m[1].replace(/\s+/g, ' ').toLowerCase()];
       var rest = m[2], mm2;
       var name = null, alias = null, display = null, generics = null, stereo = null;
       var ext = [], impl = [], opensBrace = false, bad = false;
@@ -1757,12 +1970,12 @@ P.parseClass = function (lines, meta) {
         continue;
       }
       while (rest) {
-        if ((mm2 = new RegExp('^as\\s+(' + NAME + ')\\s*(.*)$').exec(rest))) { alias = mm2[1]; rest = mm2[2]; }
-        else if ((mm2 = /^as\s+"([^"]+)"\s*(.*)$/.exec(rest))) { display = mm2[1]; rest = mm2[2]; }
+        if ((mm2 = new RegExp('^as\\s+(' + NAME + ')\\s*(.*)$', 'i').exec(rest))) { alias = mm2[1]; rest = mm2[2]; }
+        else if ((mm2 = /^as\s+"([^"]+)"\s*(.*)$/i.exec(rest))) { display = mm2[1]; rest = mm2[2]; }
         else if ((mm2 = /^<<\s*([^>]*?)\s*>>\s*(.*)$/.exec(rest))) { stereo = mm2[1]; rest = mm2[2]; }
         else if ((mm2 = /^#[\w|\\\/;:.-]+\s*(.*)$/.exec(rest))) { rest = mm2[1]; }
-        else if ((mm2 = new RegExp('^extends\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$').exec(rest))) { ext = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
-        else if ((mm2 = new RegExp('^implements\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$').exec(rest))) { impl = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
+        else if ((mm2 = new RegExp('^extends\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$', 'i').exec(rest))) { ext = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
+        else if ((mm2 = new RegExp('^implements\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$', 'i').exec(rest))) { impl = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
         else if (rest === '{' || rest === '{}') { opensBrace = rest === '{'; rest = ''; }
         else {
           D.push(P.d('error', ln, 'Unexpected "' + rest + '" in ' + m[1] + ' declaration'));
@@ -1871,7 +2084,7 @@ P.parseObject = function (lines, meta) {
     }
     if (cur) { cur.fields.push(t); continue; }
 
-    if ((m = new RegExp('^object\\s+(?:"([^"]+)"\\s+as\\s+(' + NAME + ')|"([^"]+)"|(' + NAME + '))(?:\\s+<<[^>]*>>)?(?:\\s+#\\S+)?\\s*(\\{)?\\s*$').exec(t))) {
+    if ((m = new RegExp('^object\\s+(?:"([^"]+)"\\s+as\\s+(' + NAME + ')|"([^"]+)"|(' + NAME + '))(?:\\s+<<[^>]*>>)?(?:\\s+#\\S+)?\\s*(\\{)?\\s*$', 'i').exec(t))) {
       var id = m[2] || m[3] || m[4];
       var display = m[1] || m[3] || m[4];
       var ex = objects.get(id);
@@ -1881,7 +2094,7 @@ P.parseObject = function (lines, meta) {
       if (m[5]) { cur = o; curOpenLine = ln; }
       continue;
     }
-    if (/^map\b/.test(t)) {
+    if (/^map\b/i.test(t)) {
       D.push(P.d('warning', ln, 'map (table) objects are not supported — block ignored'));
       if (/\{\s*$/.test(t)) mapSkip = 1;
       continue;
@@ -2060,8 +2273,11 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges,
     containers: containers,
+    overrides: opts && opts.posOverrides,
     dir: 'TB', gapNode: 44, gapRank: 72, gapComp: 56
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   /* containers first (behind) */
@@ -2117,11 +2333,11 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
 
   nodes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += n.box.draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, !containedIds.has(n.id), n.box.draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += n.box.draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, n.box.draw(p.x, p.y));
   });
 
   /* recompute extent (self loops / labels can stick out a bit) */
@@ -2129,8 +2345,8 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
 }
 
 P.renderClass = function (model, M, meta) {
-  var nodes = model.classes.map(function (c) { return { id: c.id, box: buildBox(c, M, 'class') }; });
-  var notes = model.notes.map(function (n) { return { id: n.id, box: buildNote(n, M), target: n.target, side: n.side }; });
+  var nodes = model.classes.map(function (c) { return { id: c.id, line: c.line, box: buildBox(c, M, 'class') }; });
+  var notes = model.notes.map(function (n) { return { id: n.id, line: n.line, box: buildNote(n, M), target: n.target, side: n.side }; });
   var attach = [];
   model.notes.forEach(function (n) {
     if (n.target && model.byId.has(n.target)) attach.push({ from: n.id, to: n.target, side: n.side });
@@ -2141,17 +2357,17 @@ P.renderClass = function (model, M, meta) {
   var containers = model.packages.map(function (p) {
     return { id: p.id, label: p.label, members: p.members.slice(), padX: 18, padTop: 34, padBottom: 16 };
   });
-  return renderBoxDiagram(nodes, model.relations, containers, notes, attach, M, {});
+  return renderBoxDiagram(nodes, model.relations, containers, notes, attach, M, { posOverrides: meta && meta.posOverrides });
 };
 
 P.renderObject = function (model, M, meta) {
-  var nodes = model.objects.map(function (o) { return { id: o.id, box: buildBox(o, M, 'object') }; });
-  var notes = model.notes.map(function (n) { return { id: n.id, box: buildNote(n, M), target: n.target, side: n.side }; });
+  var nodes = model.objects.map(function (o) { return { id: o.id, line: o.line, box: buildBox(o, M, 'object') }; });
+  var notes = model.notes.map(function (n) { return { id: n.id, line: n.line, box: buildNote(n, M), target: n.target, side: n.side }; });
   var attach = [];
   model.notes.forEach(function (n) {
     if (n.target) attach.push({ from: n.id, to: n.target, side: n.side });
   });
-  return renderBoxDiagram(nodes, model.links, [], notes, attach, M, {});
+  return renderBoxDiagram(nodes, model.links, [], notes, attach, M, { posOverrides: meta && meta.posOverrides });
 };
 
 P.buildNote = buildNote; /* reused by other renderers */
@@ -2209,11 +2425,11 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* participant declarations */
-    if ((m = new RegExp('^(' + PKINDS.join('|') + ')\\s+(.+)$').exec(t))) {
-      var kind = m[1], rest = m[2], mm;
+    if ((m = new RegExp('^(' + PKINDS.join('|') + ')\\s+(.+)$', 'i').exec(t))) {
+      var kind = m[1].toLowerCase(), rest = m[2], mm;
       var id = null, label = null;
-      if ((mm = new RegExp('^"([^"]+)"\\s+as\\s+(' + PNAME + ')\\s*(.*)$').exec(rest))) { label = mm[1]; id = mm[2]; rest = mm[3]; }
-      else if ((mm = new RegExp('^(' + PNAME + ')\\s+as\\s+"([^"]+)"\\s*(.*)$').exec(rest))) { id = mm[1]; label = mm[2]; rest = mm[3]; }
+      if ((mm = new RegExp('^"([^"]+)"\\s+as\\s+(' + PNAME + ')\\s*(.*)$', 'i').exec(rest))) { label = mm[1]; id = mm[2]; rest = mm[3]; }
+      else if ((mm = new RegExp('^(' + PNAME + ')\\s+as\\s+"([^"]+)"\\s*(.*)$', 'i').exec(rest))) { id = mm[1]; label = mm[2]; rest = mm[3]; }
       else if ((mm = /^"([^"]+)"\s*(.*)$/.exec(rest))) { id = mm[1]; label = mm[1]; rest = mm[2]; }
       else if ((mm = new RegExp('^(' + PNAME + ')\\s*(.*)$').exec(rest))) { id = mm[1]; label = mm[1]; rest = mm[2]; }
       if (id == null) { D.push(P.d('error', ln, 'Expected a name after "' + kind + '"')); continue; }
@@ -2227,12 +2443,12 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* fragments */
-    if ((m = /^(alt|opt|loop|par|break|critical|group)\b\s*(.*)$/.exec(t))) {
-      var fr = { k: 'fragOpen', op: m[1], label: m[2] || null, line: ln };
+    if ((m = /^(alt|opt|loop|par|break|critical|group)\b\s*(.*)$/i.exec(t))) {
+      var fr = { k: 'fragOpen', op: m[1].toLowerCase(), label: m[2] || null, line: ln };
       fragStack.push(fr); events.push(fr);
       continue;
     }
-    if ((m = /^else\b\s*(.*)$/.exec(t))) {
+    if ((m = /^else\b\s*(.*)$/i.exec(t))) {
       if (!fragStack.length) { D.push(P.d('error', ln, "'else' outside of any alt/par/group block")); continue; }
       var top = fragStack[fragStack.length - 1];
       if (top.op !== 'alt' && top.op !== 'par' && top.op !== 'group' && top.op !== 'opt') {
@@ -2241,7 +2457,7 @@ P.parseSequence = function (lines, meta) {
       events.push({ k: 'fragElse', label: m[1] || null, line: ln });
       continue;
     }
-    if (/^end$/.test(t)) {
+    if (/^end$/i.test(t)) {
       if (!fragStack.length) { D.push(P.d('error', ln, "'end' without a matching alt/opt/loop/par/break/critical/group")); continue; }
       fragStack.pop();
       events.push({ k: 'fragClose', line: ln });
@@ -2278,7 +2494,7 @@ P.parseSequence = function (lines, meta) {
     if (/^\|{3,}$/.test(t)) { events.push({ k: 'spacer', line: ln }); continue; }
 
     /* autonumber */
-    if ((m = /^autonumber\b\s*(.*)$/.exec(t))) {
+    if ((m = /^autonumber\b\s*(.*)$/i.exec(t))) {
       var arg = m[1].trim();
       if (arg === 'stop') events.push({ k: 'autonumber', mode: 'stop', line: ln });
       else if (arg === 'resume') events.push({ k: 'autonumber', mode: 'resume', line: ln });
@@ -2291,19 +2507,19 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* activate / deactivate / destroy / create */
-    if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var pid = P.unquote(m[2]);
-      if (!parts.has(pid)) { D.push(P.dW('error', lines[i], pid, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
-      events.push({ k: m[1], id: pid, line: ln });
+      getPart(pid, ln); /* silently auto-created, same as a participant's first mention in a message */
+      events.push({ k: m[1].toLowerCase(), id: pid, line: ln });
       continue;
     }
-    if ((m = new RegExp('^create\\s+(?:(participant|actor|control|boundary|entity|database)\\s+)?(' + PNAME + '|"[^"]+")\\s*$').exec(t))) {
+    if ((m = new RegExp('^create\\s+(?:(participant|actor|control|boundary|entity|database)\\s+)?(' + PNAME + '|"[^"]+")\\s*$', 'i').exec(t))) {
       var cid = P.unquote(m[2]);
-      getPart(cid, ln, m[1] || 'participant');
+      getPart(cid, ln, m[1] ? m[1].toLowerCase() : 'participant');
       D.push(P.d('info', ln, "create: '" + cid + "' is shown from the start (creation timing is not rendered in this editor)"));
       continue;
     }
-    if ((m = /^return\b\s*(.*)$/.exec(t))) { events.push({ k: 'return', label: m[1] || null, line: ln }); continue; }
+    if ((m = /^return\b\s*(.*)$/i.exec(t))) { events.push({ k: 'return', label: m[1] || null, line: ln }); continue; }
 
     /* message */
     var msgRe = new RegExp('^(?:"([^"]+)"|(' + PNAME + '))\\s*([xo<>\\[\\]#\\w-]*?[-<>][xo<>\\[\\]#\\w-]*?)\\s*(?:"([^"]+)"|(' + PNAME + '))\\s*([+\\-*!]{1,4})?\\s*(?::\\s*(.*))?$');
@@ -2847,7 +3063,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* boundary */
-    if ((m = /^(?:rectangle|package)\s+(?:"([^"]+)"|([\w.$ ]+?))\s*(\{)?\s*$/.exec(t))) {
+    if ((m = /^(?:rectangle|package)\s+(?:"([^"]+)"|([\w.$ ]+?))\s*(\{)?\s*$/i.exec(t))) {
       var bl = (m[1] || m[2]).trim();
       var bd = { id: '@b' + boundaries.length + ':' + bl, label: bl, members: [], line: ln };
       boundaries.push(bd);
@@ -2857,7 +3073,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* actor declaration */
-    if ((m = new RegExp('^actor\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^actor\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var nm = m[1] || m[2] || m[3];
       var al = m[4] || m[5] || m[6];
       declare('actor', al || nm, nm, ln);
@@ -2865,7 +3081,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* usecase declaration */
-    if ((m = new RegExp('^usecase\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^usecase\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var nm2 = m[1] || m[2] || m[3];
       var al2 = m[4] || m[5] || m[6];
       declare('usecase', al2 || nm2, nm2, ln);
@@ -3010,8 +3226,11 @@ P.renderUsecase = function (model, M, meta) {
 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges, containers: containers,
+    overrides: meta && meta.posOverrides,
     dir: 'LR', gapNode: 30, gapRank: 90, gapComp: 50
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   lay.rects.forEach(function (rc, cid) {
@@ -3044,11 +3263,11 @@ P.renderUsecase = function (model, M, meta) {
 
   model.els.forEach(function (e) {
     var p = lay.pos.get(e.id);
-    if (p) out += boxes.get(e.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(e.id, e.line, p.x, p.y, !containedIds.has(e.id), boxes.get(e.id).draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += boxes.get(n.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, boxes.get(n.id).draw(p.x, p.y));
   });
 
   return { body: out, w: lay.w + 8, h: lay.h + 8 };
@@ -3121,10 +3340,10 @@ P.parseState = function (lines, meta) {
     }
 
     /* state declaration */
-    if ((m = new RegExp('^state\\s+(?:"([^"]+)"\\s+as\\s+(' + SNAME + ')|"([^"]+)"|(' + SNAME + '))\\s*(<<\\s*(choice|fork|join|end|start|entryPoint|exitPoint|history)\\s*>>)?\\s*(\\{)?\\s*$').exec(t))) {
+    if ((m = new RegExp('^state\\s+(?:"([^"]+)"\\s+as\\s+(' + SNAME + ')|"([^"]+)"|(' + SNAME + '))\\s*(<<\\s*(choice|fork|join|end|start|entryPoint|exitPoint|history)\\s*>>)?\\s*(\\{)?\\s*$', 'i').exec(t))) {
       var id = m[2] || m[3] || m[4];
       var label = m[1] || m[3] || m[4];
-      var stereo = m[6] || null;
+      var stereo = m[6] ? m[6].toLowerCase() : null;
       var ex = states.get(id);
       if (ex && !ex.implicit && !m[7]) D.push(P.d('warning', ln, "state '" + id + "' was already declared (line " + ex.line + ") — declarations merged"));
       var s = getState(id, ln, true);
@@ -3308,8 +3527,11 @@ P.renderState = function (model, M, meta) {
 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges, containers: containers,
+    overrides: meta && meta.posOverrides,
     dir: 'TB', gapNode: 46, gapRank: 62, gapComp: 56
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   lay.rects.forEach(function (rc, cid) {
@@ -3358,11 +3580,11 @@ P.renderState = function (model, M, meta) {
   model.states.forEach(function (s) {
     if (s.kind === 'composite') return;
     var p = lay.pos.get(s.id);
-    if (p) out += boxes.get(s.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(s.id, s.line, p.x, p.y, !containedIds.has(s.id), boxes.get(s.id).draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += boxes.get(n.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, boxes.get(n.id).draw(p.x, p.y));
   });
 
   return { body: out, w: lay.w + 60, h: lay.h + 8 };
@@ -3519,6 +3741,497 @@ P.completionsFor = function (ctx, type, idents) {
 
 })(PUML);
 
+/* PlantUML Studio — class diagram -> source code generator.
+   Pure JS, no DOM. A tiny Mustache-like template engine (editable, explicit
+   text templates — no hidden magic) renders a per-class context built from
+   the parsed class-diagram model. Ships default Java and Python templates;
+   both the templates and the generation are exposed so a UI can let users
+   edit the template and regenerate live. */
+'use strict';
+(function (P) {
+
+/* ============================ TEMPLATE ENGINE ============================
+   Supported tags: {{path}}  {{#each path}}...{{/each}}  {{#if path}}...{{else}}...{{/if}}
+   {{#unless path}}...{{/unless}}. `path` is a dot-separated lookup resolved
+   against a context stack (innermost frame first, falling back outward —
+   so a variable from an outer scope is visible inside a nested #each/#if
+   without needing explicit parent references). A leading '!' on an #if/#unless
+   condition negates it. Block tags alone on their own line consume that whole
+   line (including the newline), like Mustache's "standalone tags", so
+   templates stay readable without producing ragged blank lines. */
+
+var STANDALONE_RE = /^[ \t]*\{\{(#each\s[^}]*|\/each|#if\s[^}]*|\/if|#unless\s[^}]*|\/unless|else)\}\}[ \t]*\r?\n/gm;
+
+function tmplGet(stack, path) {
+  if (path === '.') { /* {{.}}: the current frame's own value, for arrays of primitives */
+    for (var k = stack.length - 1; k >= 0; k--) {
+      if (stack[k] && Object.prototype.hasOwnProperty.call(stack[k], '.')) return stack[k]['.'];
+    }
+    return undefined;
+  }
+  var parts = path.split('.');
+  for (var i = stack.length - 1; i >= 0; i--) {
+    var v = stack[i], ok = true;
+    for (var j = 0; j < parts.length; j++) {
+      if (v == null || (typeof v !== 'object' && typeof v !== 'function')) { ok = false; break; }
+      v = v[parts[j]];
+      if (v === undefined) { ok = false; break; }
+    }
+    if (ok) return v;
+  }
+  return undefined;
+}
+function tmplTruthy(v) { return Array.isArray(v) ? v.length > 0 : !!v; }
+
+function tokenize(src) {
+  src = src.replace(STANDALONE_RE, function (_, inner) { return '{{' + inner + '}}'; });
+  var toks = [], i = 0;
+  while (i < src.length) {
+    var a = src.indexOf('{{', i);
+    if (a === -1) { toks.push({ t: 'text', v: src.slice(i) }); break; }
+    if (a > i) toks.push({ t: 'text', v: src.slice(i, a) });
+    var b = src.indexOf('}}', a);
+    if (b === -1) { toks.push({ t: 'text', v: src.slice(a) }); break; }
+    var inner = src.slice(a + 2, b).trim();
+    i = b + 2;
+    if (/^#each\s+/.test(inner)) toks.push({ t: 'openEach', path: inner.replace(/^#each\s+/, '').trim() });
+    else if (inner === '/each') toks.push({ t: 'closeEach' });
+    else if (/^#if\s+/.test(inner)) toks.push({ t: 'openIf', path: inner.replace(/^#if\s+/, '').trim() });
+    else if (/^#unless\s+/.test(inner)) toks.push({ t: 'openIf', path: inner.replace(/^#unless\s+/, '').trim(), negateBase: true });
+    else if (inner === '/if' || inner === '/unless') toks.push({ t: 'closeIf' });
+    else if (inner === 'else') toks.push({ t: 'else' });
+    else toks.push({ t: 'var', path: inner });
+  }
+  return toks;
+}
+
+/* stack-based parse into a node tree: {type:'text'|'var', ...} | {type:'each', path, body} | {type:'if', path, neg, then, els} */
+function parse(toks) {
+  var root = { type: 'root', body: [] };
+  var stack = [root];
+  function top() { return stack[stack.length - 1]; }
+  function push(node) { top().body.push(node); }
+  toks.forEach(function (tk) {
+    if (tk.t === 'text') push({ type: 'text', value: tk.v });
+    else if (tk.t === 'var') push({ type: 'var', path: tk.path });
+    else if (tk.t === 'openEach') { var n = { type: 'each', path: tk.path, body: [] }; push(n); stack.push(n); }
+    else if (tk.t === 'closeEach') { if (top().type === 'each') stack.pop(); }
+    else if (tk.t === 'openIf') {
+      var neg = false, path = tk.path;
+      if (tk.negateBase) neg = !neg;
+      if (path.charAt(0) === '!') { neg = !neg; path = path.slice(1).trim(); }
+      var n2 = { type: 'if', path: path, neg: neg, then: [], els: null };
+      push(n2); n2.body = n2.then; stack.push(n2);
+    }
+    else if (tk.t === 'else') { var f = top(); if (f.type === 'if') { f.els = []; f.body = f.els; } }
+    else if (tk.t === 'closeIf') { if (top().type === 'if') stack.pop(); }
+  });
+  return root;
+}
+
+function render(nodes, stack, out) {
+  nodes.forEach(function (n) {
+    if (n.type === 'text') { out.push(n.value); return; }
+    if (n.type === 'var') { var v = tmplGet(stack, n.path); out.push(v == null ? '' : String(v)); return; }
+    if (n.type === 'each') {
+      var arr = tmplGet(stack, n.path);
+      if (Array.isArray(arr)) {
+        arr.forEach(function (item, idx) {
+          var frame = (item && typeof item === 'object') ? Object.assign({}, item) : { '.': item };
+          frame['@index'] = idx; frame['@first'] = idx === 0; frame['@last'] = idx === arr.length - 1;
+          stack.push(frame);
+          render(n.body, stack, out);
+          stack.pop();
+        });
+      }
+      return;
+    }
+    if (n.type === 'if') {
+      var cond = tmplTruthy(tmplGet(stack, n.path));
+      if (n.neg) cond = !cond;
+      render(cond ? n.then : (n.els || []), stack, out);
+      return;
+    }
+  });
+}
+
+P.tmplRender = function (src, ctx) {
+  var tree = parse(tokenize(String(src == null ? '' : src)));
+  var out = [];
+  render(tree.body, [ctx || {}], out);
+  return out.join('');
+};
+
+/* ============================ MEMBER SIGNATURE PARSER ============================ */
+/* splits on top-level commas only, respecting <>, (), [] nesting (so
+   `Map<String, Integer>` in a parameter type isn't split in half) */
+function splitTopLevel(s) {
+  var parts = [], depth = 0, cur = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charAt(i);
+    if (c === '<' || c === '(' || c === '[') depth++;
+    else if (c === '>' || c === ')' || c === ']') depth = Math.max(0, depth - 1);
+    if (c === ',' && depth === 0) { parts.push(cur); cur = ''; }
+    else cur += c;
+  }
+  if (cur.trim() !== '' || parts.length) parts.push(cur);
+  return parts.map(function (p) { return p.trim(); }).filter(function (p) { return p !== ''; });
+}
+
+/* member.text is the raw signature classdiag.js kept, e.g. "speed: int",
+   "drive(m: Member): Loan", "count: int = 0", or a bare "RED" (enum literal) */
+P.parseMemberSignature = function (text) {
+  text = String(text || '').trim();
+  var m = /^([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*(?::\s*(.+))?$/.exec(text);
+  if (m) {
+    var params = splitTopLevel(m[2]).map(function (p) {
+      var pm = /^([A-Za-z_$][\w$]*)\s*(?::\s*(.+))?$/.exec(p);
+      return pm ? { name: pm[1], type: (pm[2] || 'Object').trim() } : { name: p, type: 'Object' };
+    });
+    return { isMethod: true, name: m[1], params: params, returnType: (m[3] || 'void').trim() };
+  }
+  var a = /^([A-Za-z_$][\w$]*)\s*(?::\s*([^=]+?))?\s*(?:=\s*(.+))?$/.exec(text);
+  if (a) return { isMethod: false, name: a[1], type: a[2] ? a[2].trim() : 'Object', defaultValue: a[3] ? a[3].trim() : null };
+  return { isMethod: false, name: text || 'value', type: 'Object', defaultValue: null };
+};
+
+/* ============================ TYPE MAPPING (Java-ish -> Python) ============================ */
+var PY_TYPE_MAP = {
+  int: 'int', integer: 'int', long: 'int', short: 'int', byte: 'int',
+  double: 'float', float: 'float', boolean: 'bool', bool: 'bool',
+  char: 'str', character: 'str', string: 'str', void: 'None', object: 'object'
+};
+function toPyType(t) {
+  t = String(t || '').trim();
+  var g = /^([\w.]+)\s*<\s*(.+)\s*>$/.exec(t);
+  if (g) {
+    var outer = g[1].toLowerCase();
+    if (outer === 'list' || outer === 'arraylist' || outer === 'linkedlist' || outer === 'collection') return 'List[' + toPyType(g[2]) + ']';
+    if (outer === 'set' || outer === 'hashset') return 'Set[' + toPyType(g[2]) + ']';
+    if (outer === 'map' || outer === 'hashmap') {
+      var kv = splitTopLevel(g[2]);
+      return 'Dict[' + toPyType(kv[0] || 'object') + ', ' + toPyType(kv[1] || 'object') + ']';
+    }
+    return toPyType(g[2]);
+  }
+  var low = t.toLowerCase();
+  return PY_TYPE_MAP[low] || t;
+}
+function camelToSnake(s) {
+  return String(s || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase();
+}
+var VIS_JAVA = { '+': 'public ', '-': 'private ', '#': 'protected ', '~': '' };
+
+/* a UML member name is free-form text and may collide with a reserved word
+   in the target language (a "return()" operation is a plausible, real
+   example) — append '_' the way both language communities conventionally do */
+var JAVA_KEYWORDS = ('abstract assert boolean break byte case catch char class const continue default do double ' +
+  'else enum extends final finally float for goto if implements import instanceof int interface long native new ' +
+  'package private protected public return short static strictfp super switch synchronized this throw throws ' +
+  'transient try void volatile while true false null var record yield').split(' ');
+var PY_KEYWORDS = ('False None True and as assert async await break class continue def del elif else except ' +
+  'finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self').split(' ');
+function escJava(name) { return JAVA_KEYWORDS.indexOf(name) >= 0 ? name + '_' : name; }
+function escPy(name) { return PY_KEYWORDS.indexOf(name) >= 0 ? name + '_' : name; }
+
+/* ============================ CLASS MODEL -> GENERATION MODEL ============================ */
+/* One entry per top-level (non-implicit) class/interface/enum/etc. Attaches
+   both *java and py* fields to every attribute/parameter/method so ONE model
+   drives both default templates (and any custom ones). */
+P.classGenModel = function (model) {
+  var byId = model.byId;
+  var superOf = {}, interfacesOf = {};
+  (model.relations || []).forEach(function (rel) {
+    if (!rel.cls || !rel.cls.isHierarchy) return;
+    var childId, parentId;
+    if (rel.cls.decoR === 'tri') { childId = rel.from; parentId = rel.to; }
+    else if (rel.cls.decoL === 'tri') { childId = rel.to; parentId = rel.from; }
+    else return;
+    if (rel.cls.style === 'dashed') { (interfacesOf[childId] = interfacesOf[childId] || []).push(parentId); }
+    else { superOf[childId] = parentId; }
+  });
+
+  /* PASS 1: each class's own attributes/methods, keyed by model id (not yet
+     aware of inheritance — that needs every class's own info to exist first) */
+  var infoById = {};
+  model.classes.filter(function (c) { return !c.implicit; }).forEach(function (c) {
+    var isEnum = c.kind === 'enum';
+    var isInterface = c.kind === 'interface' || c.kind === 'annotation';
+    var isAbstract = c.kind === 'abstract';
+    var superId = superOf[c.id] || null;
+    var superName = superId && byId.has(superId) ? byId.get(superId).display : null;
+    var ifaceNames = (interfacesOf[c.id] || []).map(function (id) { return byId.has(id) ? byId.get(id).display : id; });
+
+    var attributes = [], methods = [], enumValues = [];
+    (c.members || []).forEach(function (mb) {
+      if (mb.kind === 'sep') return;
+      var sig = P.parseMemberSignature(mb.text);
+      if (isEnum && !sig.isMethod) { enumValues.push(sig.name); return; }
+      var visKw = VIS_JAVA[mb.vis] != null ? VIS_JAVA[mb.vis] : 'public ';
+      var pyVis = (mb.vis === '-' || mb.vis === '#') ? '_' : '';
+      if (sig.isMethod) {
+        var params = sig.params.map(function (p) {
+          return {
+            name: escJava(p.name), type: p.type,
+            pyName: escPy(camelToSnake(p.name)), pyType: toPyType(p.type)
+          };
+        });
+        var bodiless = isInterface || mb.abst;
+        methods.push({
+          name: escJava(sig.name), pyName: escPy(camelToSnake(sig.name)),
+          visKw: visKw, isStatic: mb.stat, isAbstract: !!mb.abst, bodiless: bodiless,
+          returnType: sig.returnType, isVoid: /^void$/i.test(sig.returnType),
+          pyReturnType: toPyType(sig.returnType),
+          params: params,
+          paramsStr: params.map(function (p) { return p.type + ' ' + p.name; }).join(', '),
+          pyParamsStr: ['self'].concat(params.map(function (p) { return p.pyName + ': ' + p.pyType; })).join(', ')
+        });
+      } else {
+        var pyParamName = escPy(camelToSnake(sig.name));
+        attributes.push({
+          name: escJava(sig.name), pyName: pyVis + pyParamName, pyParamName: pyParamName,
+          visKw: visKw, isStatic: mb.stat,
+          type: sig.type, pyType: toPyType(sig.type),
+          hasDefault: sig.defaultValue != null, defaultValue: sig.defaultValue
+        });
+      }
+    });
+
+    var instanceAttrs = attributes.filter(function (a) { return !a.isStatic; });
+    var staticAttrs = attributes.filter(function (a) { return a.isStatic; });
+
+    infoById[c.id] = {
+      id: c.id, name: c.display, kind: c.kind,
+      isAbstract: isAbstract, isInterface: isInterface, isEnum: isEnum,
+      superId: superId, superName: superName, interfaceIds: interfacesOf[c.id] || [], ifaceNames: ifaceNames,
+      attributes: attributes, instanceAttrs: instanceAttrs, staticAttrs: staticAttrs,
+      methods: methods, enumValues: enumValues
+    };
+  });
+
+  /* every method a CONCRETE descendant of `id` must eventually provide a body
+     for: the class/interface's own bodiless methods, plus whatever its own
+     ancestors still require and it doesn't itself override with a real body */
+  function collectRequirements(id, seen) {
+    if (seen[id] || !infoById[id]) return {};
+    seen[id] = true;
+    var info = infoById[id], reqs = {};
+    ([info.superId].concat(info.interfaceIds)).forEach(function (pid) {
+      if (!pid) return;
+      var inherited = collectRequirements(pid, seen);
+      Object.keys(inherited).forEach(function (k) { reqs[k] = inherited[k]; });
+    });
+    info.methods.forEach(function (m) {
+      var k = m.name + '/' + m.params.length;
+      if (m.bodiless) reqs[k] = m; else delete reqs[k];
+    });
+    return reqs;
+  }
+
+  /* a class's own instance attributes are assigned in ITS constructor; every
+     ancestor's instance attributes must still reach that constructor so it
+     can forward them via super(...) — Java requires an explicit super call
+     whenever the parent has no viable no-arg constructor */
+  function collectInheritedAttrs(id) {
+    var chain = [], cur = infoById[id] && infoById[id].superId, seen = {};
+    var supers = [];
+    while (cur && infoById[cur] && !seen[cur]) { seen[cur] = true; supers.unshift(cur); cur = infoById[cur].superId; }
+    supers.forEach(function (sid) { chain = chain.concat(infoById[sid].instanceAttrs); });
+    return chain;
+  }
+
+  /* PASS 2: resolve inheritance — inject stub overrides for anything a
+     concrete class still owes an ancestor interface/abstract class, and
+     thread ancestor fields through the constructor chain */
+  var classes = Object.keys(infoById).map(function (id) {
+    var info = infoById[id];
+    var methods = info.methods.slice();
+    if (!info.isEnum && !info.isInterface && !info.isAbstract) {
+      var reqs = {};
+      ([info.superId].concat(info.interfaceIds)).forEach(function (pid) {
+        if (!pid) return;
+        var r = collectRequirements(pid, {});
+        Object.keys(r).forEach(function (k) { reqs[k] = r[k]; });
+      });
+      info.methods.forEach(function (m) { delete reqs[m.name + '/' + m.params.length]; });
+      Object.keys(reqs).forEach(function (k) {
+        methods.push(Object.assign({}, reqs[k], { bodiless: false, isAbstract: false, isStatic: false, visKw: 'public ' }));
+      });
+    }
+
+    var inheritedAttrs = (info.isEnum || info.isInterface) ? [] : collectInheritedAttrs(id);
+    var allCtorAttrs = inheritedAttrs.concat(info.instanceAttrs);
+    var hasSuperCtorArgs = !!(info.superName && inheritedAttrs.length);
+    var needsAbcHere = info.isInterface || methods.some(function (m) { return m.bodiless; });
+    var pyBases = (info.superName ? [info.superName] : []).concat(info.ifaceNames);
+    /* @abstractmethod is a no-op unless the class actually derives from ABC —
+       every class that declares one (interfaces, and abstract classes with
+       at least one still-abstract method) needs it in its own base list,
+       even if a superclass elsewhere in the chain already has it (redundant
+       but harmless — Python's MRO collapses repeated bases) */
+    if (needsAbcHere && pyBases.indexOf('ABC') < 0) pyBases.push('ABC');
+
+    /* Python needs the real base-class objects to build the class (unlike
+       Java, which finds sibling .java files via the classpath automatically),
+       so — unlike attribute/parameter type hints, which `from __future__
+       import annotations` below makes lazy — base classes need a real import */
+    var pyImports = [], seenImp = {};
+    ([info.superId].concat(info.interfaceIds)).forEach(function (pid) {
+      if (!pid || !infoById[pid] || seenImp[pid]) return;
+      seenImp[pid] = true;
+      var otherName = infoById[pid].name;
+      pyImports.push({ module: camelToSnake(otherName), name: otherName });
+    });
+
+    return {
+      name: info.name, kind: info.kind,
+      isClass: !info.isEnum && !info.isInterface && !info.isAbstract,
+      isAbstract: info.isAbstract, isInterface: info.isInterface, isEnum: info.isEnum,
+      superclass: info.superName, interfaces: info.ifaceNames, hasInterfaces: info.ifaceNames.length > 0,
+      interfacesStr: info.ifaceNames.join(', '),
+      extendsClause: info.superName ? ' extends ' + info.superName : '',
+      implementsClause: info.ifaceNames.length ? ' implements ' + info.ifaceNames.join(', ') : '',
+      pyBases: pyBases, pyBasesStr: pyBases.join(', '), hasPyBases: pyBases.length > 0,
+      needsAbc: needsAbcHere,
+      needsTyping: info.attributes.concat(methods.reduce(function (a, m) { return a.concat(m.params); }, []))
+        .some(function (x) { return /^(List|Set|Dict)\[/.test(x.pyType); }),
+      attributes: info.attributes, instanceAttrs: info.instanceAttrs, staticAttrs: info.staticAttrs,
+      hasAttributes: info.attributes.length > 0, hasInstanceAttrs: info.instanceAttrs.length > 0,
+      methods: methods, hasMethods: methods.length > 0,
+      enumValues: info.enumValues, enumValuesStr: info.enumValues.join(', '),
+      pyImports: pyImports, hasPyImports: pyImports.length > 0,
+      hasSuperCtorArgs: hasSuperCtorArgs,
+      hasCtorBody: hasSuperCtorArgs || info.instanceAttrs.length > 0,
+      superCallArgsStr: inheritedAttrs.map(function (a) { return a.name; }).join(', '),
+      pySuperCallArgsStr: inheritedAttrs.map(function (a) { return a.pyParamName; }).join(', '),
+      javaCtorParamsStr: allCtorAttrs.map(function (a) { return a.type + ' ' + a.name; }).join(', '),
+      pyInitParamsStr: ['self'].concat(allCtorAttrs.map(function (a) {
+        return a.pyParamName + ': ' + a.pyType + (a.hasDefault ? ' = ' + a.defaultValue : '');
+      })).join(', ')
+    };
+  });
+  return { classes: classes };
+};
+
+/* ============================ DEFAULT TEMPLATES (editable) ============================ */
+P.JAVA_TEMPLATE = [
+  '{{#if isEnum}}',
+  'public enum {{name}} {',
+  '    {{enumValuesStr}}',
+  '}',
+  '{{else}}',
+  'public {{#if isAbstract}}abstract {{/if}}{{#if isInterface}}interface{{else}}class{{/if}} {{name}}{{extendsClause}}{{implementsClause}} {',
+  '',
+  '{{#each staticAttrs}}',
+  '    {{visKw}}static {{type}} {{name}}{{#if hasDefault}} = {{defaultValue}}{{/if}};',
+  '{{/each}}',
+  '{{#each instanceAttrs}}',
+  '    {{visKw}}{{type}} {{name}}{{#if hasDefault}} = {{defaultValue}}{{/if}};',
+  '{{/each}}',
+  '',
+  '{{#unless isInterface}}',
+  '    public {{name}}({{javaCtorParamsStr}}) {',
+  '{{#if hasSuperCtorArgs}}',
+  '        super({{superCallArgsStr}});',
+  '{{/if}}',
+  '{{#each instanceAttrs}}',
+  '        this.{{name}} = {{name}};',
+  '{{/each}}',
+  '    }',
+  '',
+  '{{/unless}}',
+  '{{#each methods}}',
+  '    {{visKw}}{{#if isStatic}}static {{/if}}{{#if bodiless}}abstract {{/if}}{{returnType}} {{name}}({{paramsStr}}){{#if bodiless}};{{else}} {',
+  '        throw new UnsupportedOperationException("TODO: implement {{name}}");',
+  '    }{{/if}}',
+  '',
+  '{{/each}}',
+  '}',
+  '{{/if}}',
+  ''
+].join('\n');
+
+P.PYTHON_TEMPLATE = [
+  '{{#if isEnum}}',
+  'from enum import Enum, auto',
+  '',
+  '',
+  'class {{name}}(Enum):',
+  '{{#each enumValues}}',
+  '    {{.}} = auto()',
+  '{{/each}}',
+  '{{else}}',
+  'from __future__ import annotations',
+  '{{#if needsAbc}}',
+  'from abc import ABC, abstractmethod',
+  '{{/if}}',
+  '{{#if needsTyping}}',
+  'from typing import List, Set, Dict',
+  '{{/if}}',
+  '{{#each pyImports}}',
+  'from {{module}} import {{name}}',
+  '{{/each}}',
+  '',
+  '',
+  'class {{name}}{{#if hasPyBases}}({{pyBasesStr}}){{/if}}:',
+  '',
+  '{{#each staticAttrs}}',
+  '    {{name}}: {{pyType}}{{#if hasDefault}} = {{defaultValue}}{{/if}}',
+  '{{/each}}',
+  '',
+  '{{#unless isInterface}}',
+  '    def __init__({{pyInitParamsStr}}):',
+  '{{#if hasSuperCtorArgs}}',
+  '        super().__init__({{pySuperCallArgsStr}})',
+  '{{/if}}',
+  '{{#each instanceAttrs}}',
+  '        self.{{pyName}} = {{pyParamName}}',
+  '{{/each}}',
+  '{{#unless hasCtorBody}}',
+  '        pass',
+  '{{/unless}}',
+  '',
+  '{{/unless}}',
+  '{{#each methods}}',
+  '{{#if isStatic}}',
+  '    @staticmethod',
+  '    def {{pyName}}({{#each params}}{{pyName}}: {{pyType}}{{#unless @last}}, {{/unless}}{{/each}}) -> {{pyReturnType}}:',
+  '{{else}}',
+  '{{#if bodiless}}',
+  '    @abstractmethod',
+  '{{/if}}',
+  '    def {{pyName}}({{pyParamsStr}}) -> {{pyReturnType}}:',
+  '{{/if}}',
+  '{{#if bodiless}}',
+  '        ...',
+  '{{else}}',
+  '        raise NotImplementedError("TODO: implement {{pyName}}")',
+  '{{/if}}',
+  '',
+  '{{/each}}',
+  '{{/if}}',
+  ''
+].join('\n');
+
+/* ============================ ENTRY POINT ============================ */
+/* Returns [{className, filename, code}] — one file per top-level
+   class/interface/enum. lang: 'java' | 'python'. */
+P.genCode = function (model, template, lang) {
+  var gm = P.classGenModel(model);
+  return gm.classes.map(function (c) {
+    var code = P.tmplRender(template, c);
+    var filename = lang === 'python' ? camelToSnake(c.name) + '.py' : c.name + '.java';
+    return { className: c.name, filename: filename, code: code };
+  });
+};
+P.camelToSnake = camelToSnake;
+P.toPyType = toPyType;
+
+})(PUML);
+
 /* PlantUML Studio — compile entry point, examples, syntax reference. */
 'use strict';
 (function (P) {
@@ -3537,6 +4250,7 @@ P.compile = function (text, opts) {
   opts = opts || {};
   var M = opts.measure || P.defaultMeasure;
   var pre = P.preprocess(text);
+  pre.meta.posOverrides = P.extractPosOverrides(text);
   var diags = pre.diagnostics.slice();
   var det = P.detectType(pre.lines, pre.meta);
   var type = (opts.type && opts.type !== 'auto') ? opts.type : det.type;
@@ -4047,6 +4761,7 @@ function compileNow() {
   renderStatus(res, counts);
   renderPreview(res, counts);
   if (renderMode === 'plantuml') scheduleOfficial();
+  if (codeModal && !codeModal.classList.contains('hidden')) regenerateCode();
   try { localStorage.setItem(LS_DOC, text); localStorage.setItem(LS_TYPE, type); } catch (e) {}
 }
 
@@ -4198,6 +4913,111 @@ $('z100').addEventListener('click', function () {
   applyView();
 });
 window.addEventListener('resize', function () { if (!view.touched) fit(); });
+
+/* ---------------- graphical bi-sync editing ----------------
+   The rendered SVG is a pure function of the text (see P.compile). These
+   handlers never touch a separate diagram model — every interaction reads
+   the node's data-* attributes off the SVG the renderer already produced,
+   then rewrites elCode.value with a text-surgical core helper and
+   recompiles. Click navigates; drag persists a position via an
+   auto-managed `' @pos id x,y` comment (an ordinary PlantUML comment, so
+   the source stays valid outside this editor too); double-click renames
+   the identifier everywhere it's referenced. */
+function svgNodeAt(target) { return target && target.closest ? target.closest('.pu-node') : null; }
+
+var selectedNodeG = null;
+function clearNodeSelection() { if (selectedNodeG) selectedNodeG.classList.remove('pu-selected'); selectedNodeG = null; }
+function selectNode(g) { clearNodeSelection(); selectedNodeG = g; g.classList.add('pu-selected'); }
+
+var dragState = null, justDragged = false;
+elVpStudio.addEventListener('pointerdown', function (e) {
+  if (e.button !== 0) return;
+  var g = svgNodeAt(e.target);
+  if (!g || g.getAttribute('data-draggable') !== '1') return;
+  e.stopPropagation();
+  dragState = {
+    g: g, pointerId: e.pointerId, moved: false,
+    startX: e.clientX, startY: e.clientY,
+    origX: parseFloat(g.getAttribute('data-x')) || 0,
+    origY: parseFloat(g.getAttribute('data-y')) || 0
+  };
+  g.classList.add('pu-dragging');
+  try { g.setPointerCapture(e.pointerId); } catch (err) {}
+});
+elVpStudio.addEventListener('pointermove', function (e) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  var dx = (e.clientX - dragState.startX) / view.zoom;
+  var dy = (e.clientY - dragState.startY) / view.zoom;
+  if (Math.abs(dx) + Math.abs(dy) > 2) dragState.moved = true;
+  dragState.dx = dx; dragState.dy = dy;
+  dragState.g.setAttribute('transform', 'translate(' + dx + ',' + dy + ')');
+});
+function endNodeDrag() {
+  if (!dragState) return;
+  var g = dragState.g;
+  g.classList.remove('pu-dragging');
+  g.removeAttribute('transform');
+  if (dragState.moved) {
+    justDragged = true;
+    var id = g.getAttribute('data-node');
+    elCode.value = PUML.upsertPosOverride(elCode.value, id, dragState.origX + dragState.dx, dragState.origY + dragState.dy);
+    compileNow();
+  }
+  dragState = null;
+}
+elVpStudio.addEventListener('pointerup', endNodeDrag);
+elVpStudio.addEventListener('pointercancel', endNodeDrag);
+
+elVpStudio.addEventListener('click', function (e) {
+  if (justDragged) { justDragged = false; return; }
+  var g = svgNodeAt(e.target);
+  if (!g) { clearNodeSelection(); return; }
+  selectNode(g);
+  var line = g.getAttribute('data-line');
+  if (line) gotoLine(+line);
+});
+
+function startNodeRename(g) {
+  var id = g.getAttribute('data-node');
+  if (!id || id.charAt(0) === '@') return; /* notes and pseudo-states have no user-facing name to rename */
+  var rect = g.getBoundingClientRect();
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'pu-rename-input';
+  inp.value = id;
+  inp.spellcheck = false;
+  inp.style.left = rect.left + 'px';
+  inp.style.top = rect.top + 'px';
+  inp.style.width = Math.max(rect.width, 70) + 'px';
+  document.body.appendChild(inp);
+  inp.focus();
+  inp.select();
+  var done = false;
+  function commit() {
+    if (done) return;
+    done = true;
+    var newName = inp.value.trim();
+    inp.remove();
+    if (!newName || newName === id) return;
+    var result = PUML.renameIdentifier(elCode.value, id, newName);
+    if (result.error) { toast(result.error); return; }
+    elCode.value = result.text;
+    compileNow();
+    toast("Renamed '" + id + "' to '" + newName + "'");
+  }
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); done = true; inp.remove(); }
+    e.stopPropagation();
+  });
+  inp.addEventListener('blur', commit);
+}
+elVpStudio.addEventListener('dblclick', function (e) {
+  var g = svgNodeAt(e.target);
+  if (!g) return;
+  e.preventDefault();
+  startNodeRename(g);
+});
 
 /* ---------------- editor behaviour ---------------- */
 elCode.addEventListener('input', function () { renderHighlight(); schedule(); updatePos(); maybeComplete(false); });
@@ -4435,6 +5255,11 @@ function openHelp(type) {
     "Comments start with '. Documents should be wrapped in @startuml … @enduml. " +
     'Global directives (title, skinparam, hide, scale, …) are accepted; skinparam styling and the preprocessor (!include, !define) are not interpreted.';
   modalBody.appendChild(note);
+  var note2 = document.createElement('p');
+  note2.className = 'modal-note';
+  note2.textContent = 'The diagram itself is editable: click a shape to jump to its source line, double-click its name to rename it everywhere, ' +
+    'or drag it to reposition it (class, object, use case and state diagrams — the position is saved as an ordinary \' @pos comment).';
+  modalBody.appendChild(note2);
 }
 $('btnHelp').addEventListener('click', function () {
   openHelp(lastResult && lastResult.type ? lastResult.type : 'class');
@@ -4656,6 +5481,100 @@ divider.addEventListener('pointermove', function (e) {
   divider.addEventListener(ev, function () { dragging = null; divider.classList.remove('drag'); });
 });
 
+/* ---------------- code generation (Java / Python) ---------------- */
+var codeModal = $('codeModal'), codeLangTabs = $('codeLangTabs');
+var codeTemplateEditor = $('codeTemplateEditor'), codeOutput = $('codeOutput'), codeFileSelect = $('codeFileSelect');
+var codeNote = $('codeNote');
+var CODE_LANG_KEY = 'plantuml-studio.codegen.lang';
+var CODE_TPL_KEY_PREFIX = 'plantuml-studio.codegen.tpl.';
+var codeLang = 'java', codeFiles = [], codeGenTimer = null;
+
+function defaultTemplate(lang) { return lang === 'python' ? PUML.PYTHON_TEMPLATE : PUML.JAVA_TEMPLATE; }
+function loadTemplate(lang) {
+  try { var saved = localStorage.getItem(CODE_TPL_KEY_PREFIX + lang); if (saved != null) return saved; } catch (e) {}
+  return defaultTemplate(lang);
+}
+function saveTemplate(lang, text) {
+  try { localStorage.setItem(CODE_TPL_KEY_PREFIX + lang, text); } catch (e) {}
+}
+function regenerateCode() {
+  if (!lastResult || lastResult.type !== 'class' || !lastResult.model) {
+    codeFiles = [];
+    codeFileSelect.innerHTML = '';
+    codeOutput.value = '';
+    codeNote.textContent = 'Code generation reads a class diagram\'s classes, members and relationships — switch to (or write) one to generate ' + (codeLang === 'python' ? 'Python' : 'Java') + '.';
+    return;
+  }
+  var prevClass = codeFileSelect.value;
+  try {
+    codeFiles = PUML.genCode(lastResult.model, codeTemplateEditor.value, codeLang);
+    codeNote.textContent = codeFiles.length + ' file' + (codeFiles.length === 1 ? '' : 's') +
+      ' generated from the class diagram — inherited interface/abstract methods are stubbed in, and constructors chain to their superclass.';
+  } catch (e) {
+    codeFiles = [];
+    codeNote.textContent = 'Template error: ' + (e && e.message ? e.message : e);
+  }
+  codeFileSelect.innerHTML = '';
+  codeFiles.forEach(function (f) {
+    var opt = document.createElement('option');
+    opt.value = f.className; opt.textContent = f.filename;
+    codeFileSelect.appendChild(opt);
+  });
+  if (codeFiles.length) {
+    var idx = -1;
+    for (var i = 0; i < codeFiles.length; i++) if (codeFiles[i].className === prevClass) { idx = i; break; }
+    codeFileSelect.selectedIndex = idx >= 0 ? idx : 0;
+    codeOutput.value = codeFiles[codeFileSelect.selectedIndex].code;
+  } else {
+    codeOutput.value = '';
+  }
+}
+codeFileSelect.addEventListener('change', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  codeOutput.value = f ? f.code : '';
+});
+codeTemplateEditor.addEventListener('input', function () {
+  saveTemplate(codeLang, codeTemplateEditor.value);
+  clearTimeout(codeGenTimer);
+  codeGenTimer = setTimeout(regenerateCode, 200);
+});
+$('codeResetTemplate').addEventListener('click', function () {
+  codeTemplateEditor.value = defaultTemplate(codeLang);
+  saveTemplate(codeLang, codeTemplateEditor.value);
+  regenerateCode();
+  toast('Template reset to default');
+});
+$('codeCopyBtn').addEventListener('click', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  if (!f) { toast('Nothing to copy yet'); return; }
+  copyText(f.code, 'Copied ' + f.filename);
+});
+$('codeDownloadBtn').addEventListener('click', function () {
+  var f = codeFiles[codeFileSelect.selectedIndex];
+  if (!f) { toast('Nothing to export yet'); return; }
+  exportFile(f.filename, f.code, 'text/plain', f.code);
+});
+function setCodeLang(lang) {
+  codeLang = lang;
+  Array.prototype.forEach.call(codeLangTabs.querySelectorAll('button'), function (b) {
+    b.classList.toggle('on', b.getAttribute('data-lang') === lang);
+  });
+  codeTemplateEditor.value = loadTemplate(lang);
+  try { localStorage.setItem(CODE_LANG_KEY, lang); } catch (e) {}
+  regenerateCode();
+}
+codeLangTabs.addEventListener('click', function (e) {
+  var b = e.target.closest ? e.target.closest('button') : null;
+  if (b) setCodeLang(b.getAttribute('data-lang'));
+});
+$('btnCode').addEventListener('click', function () {
+  codeModal.classList.remove('hidden');
+  regenerateCode();
+});
+$('codeModalClose').addEventListener('click', function () { codeModal.classList.add('hidden'); });
+codeModal.addEventListener('click', function (e) { if (e.target === codeModal) codeModal.classList.add('hidden'); });
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') codeModal.classList.add('hidden'); });
+
 /* ---------------- boot ---------------- */
 (function boot() {
   try {
@@ -4664,6 +5583,10 @@ divider.addEventListener('pointermove', function (e) {
       main.style.gridTemplateColumns = 'minmax(280px,' + (sp * 100).toFixed(1) + 'fr) 6px minmax(280px,' + ((1 - sp) * 100).toFixed(1) + 'fr)';
     }
   } catch (e) {}
+
+  var savedLang = 'java';
+  try { savedLang = localStorage.getItem(CODE_LANG_KEY) || 'java'; } catch (e) {}
+  setCodeLang(savedLang === 'python' ? 'python' : 'java');
 
   var wantOfficial = /official/.test(location.hash || '');
   var hashEx = /[#&]ex=([^&]+)/.exec(location.hash || '');

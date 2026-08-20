@@ -49,11 +49,11 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* participant declarations */
-    if ((m = new RegExp('^(' + PKINDS.join('|') + ')\\s+(.+)$').exec(t))) {
-      var kind = m[1], rest = m[2], mm;
+    if ((m = new RegExp('^(' + PKINDS.join('|') + ')\\s+(.+)$', 'i').exec(t))) {
+      var kind = m[1].toLowerCase(), rest = m[2], mm;
       var id = null, label = null;
-      if ((mm = new RegExp('^"([^"]+)"\\s+as\\s+(' + PNAME + ')\\s*(.*)$').exec(rest))) { label = mm[1]; id = mm[2]; rest = mm[3]; }
-      else if ((mm = new RegExp('^(' + PNAME + ')\\s+as\\s+"([^"]+)"\\s*(.*)$').exec(rest))) { id = mm[1]; label = mm[2]; rest = mm[3]; }
+      if ((mm = new RegExp('^"([^"]+)"\\s+as\\s+(' + PNAME + ')\\s*(.*)$', 'i').exec(rest))) { label = mm[1]; id = mm[2]; rest = mm[3]; }
+      else if ((mm = new RegExp('^(' + PNAME + ')\\s+as\\s+"([^"]+)"\\s*(.*)$', 'i').exec(rest))) { id = mm[1]; label = mm[2]; rest = mm[3]; }
       else if ((mm = /^"([^"]+)"\s*(.*)$/.exec(rest))) { id = mm[1]; label = mm[1]; rest = mm[2]; }
       else if ((mm = new RegExp('^(' + PNAME + ')\\s*(.*)$').exec(rest))) { id = mm[1]; label = mm[1]; rest = mm[2]; }
       if (id == null) { D.push(P.d('error', ln, 'Expected a name after "' + kind + '"')); continue; }
@@ -67,12 +67,12 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* fragments */
-    if ((m = /^(alt|opt|loop|par|break|critical|group)\b\s*(.*)$/.exec(t))) {
-      var fr = { k: 'fragOpen', op: m[1], label: m[2] || null, line: ln };
+    if ((m = /^(alt|opt|loop|par|break|critical|group)\b\s*(.*)$/i.exec(t))) {
+      var fr = { k: 'fragOpen', op: m[1].toLowerCase(), label: m[2] || null, line: ln };
       fragStack.push(fr); events.push(fr);
       continue;
     }
-    if ((m = /^else\b\s*(.*)$/.exec(t))) {
+    if ((m = /^else\b\s*(.*)$/i.exec(t))) {
       if (!fragStack.length) { D.push(P.d('error', ln, "'else' outside of any alt/par/group block")); continue; }
       var top = fragStack[fragStack.length - 1];
       if (top.op !== 'alt' && top.op !== 'par' && top.op !== 'group' && top.op !== 'opt') {
@@ -81,7 +81,7 @@ P.parseSequence = function (lines, meta) {
       events.push({ k: 'fragElse', label: m[1] || null, line: ln });
       continue;
     }
-    if (/^end$/.test(t)) {
+    if (/^end$/i.test(t)) {
       if (!fragStack.length) { D.push(P.d('error', ln, "'end' without a matching alt/opt/loop/par/break/critical/group")); continue; }
       fragStack.pop();
       events.push({ k: 'fragClose', line: ln });
@@ -118,7 +118,7 @@ P.parseSequence = function (lines, meta) {
     if (/^\|{3,}$/.test(t)) { events.push({ k: 'spacer', line: ln }); continue; }
 
     /* autonumber */
-    if ((m = /^autonumber\b\s*(.*)$/.exec(t))) {
+    if ((m = /^autonumber\b\s*(.*)$/i.exec(t))) {
       var arg = m[1].trim();
       if (arg === 'stop') events.push({ k: 'autonumber', mode: 'stop', line: ln });
       else if (arg === 'resume') events.push({ k: 'autonumber', mode: 'resume', line: ln });
@@ -131,19 +131,19 @@ P.parseSequence = function (lines, meta) {
     }
 
     /* activate / deactivate / destroy / create */
-    if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^(activate|deactivate|destroy)\\s+(' + PNAME + '|"[^"]+")\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var pid = P.unquote(m[2]);
-      if (!parts.has(pid)) { D.push(P.dW('error', lines[i], pid, "'" + pid + "' has not appeared yet — declare it or send it a message first")); getPart(pid, ln); }
-      events.push({ k: m[1], id: pid, line: ln });
+      getPart(pid, ln); /* silently auto-created, same as a participant's first mention in a message */
+      events.push({ k: m[1].toLowerCase(), id: pid, line: ln });
       continue;
     }
-    if ((m = new RegExp('^create\\s+(?:(participant|actor|control|boundary|entity|database)\\s+)?(' + PNAME + '|"[^"]+")\\s*$').exec(t))) {
+    if ((m = new RegExp('^create\\s+(?:(participant|actor|control|boundary|entity|database)\\s+)?(' + PNAME + '|"[^"]+")\\s*$', 'i').exec(t))) {
       var cid = P.unquote(m[2]);
-      getPart(cid, ln, m[1] || 'participant');
+      getPart(cid, ln, m[1] ? m[1].toLowerCase() : 'participant');
       D.push(P.d('info', ln, "create: '" + cid + "' is shown from the start (creation timing is not rendered in this editor)"));
       continue;
     }
-    if ((m = /^return\b\s*(.*)$/.exec(t))) { events.push({ k: 'return', label: m[1] || null, line: ln }); continue; }
+    if ((m = /^return\b\s*(.*)$/i.exec(t))) { events.push({ k: 'return', label: m[1] || null, line: ln }); continue; }
 
     /* message */
     var msgRe = new RegExp('^(?:"([^"]+)"|(' + PNAME + '))\\s*([xo<>\\[\\]#\\w-]*?[-<>][xo<>\\[\\]#\\w-]*?)\\s*(?:"([^"]+)"|(' + PNAME + '))\\s*([+\\-*!]{1,4})?\\s*(?::\\s*(.*))?$');

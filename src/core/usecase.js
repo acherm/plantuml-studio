@@ -69,7 +69,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* boundary */
-    if ((m = /^(?:rectangle|package)\s+(?:"([^"]+)"|([\w.$ ]+?))\s*(\{)?\s*$/.exec(t))) {
+    if ((m = /^(?:rectangle|package)\s+(?:"([^"]+)"|([\w.$ ]+?))\s*(\{)?\s*$/i.exec(t))) {
       var bl = (m[1] || m[2]).trim();
       var bd = { id: '@b' + boundaries.length + ':' + bl, label: bl, members: [], line: ln };
       boundaries.push(bd);
@@ -79,7 +79,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* actor declaration */
-    if ((m = new RegExp('^actor\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^actor\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?::([^:]+):|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var nm = m[1] || m[2] || m[3];
       var al = m[4] || m[5] || m[6];
       declare('actor', al || nm, nm, ln);
@@ -87,7 +87,7 @@ P.parseUsecase = function (lines, meta) {
     }
 
     /* usecase declaration */
-    if ((m = new RegExp('^usecase\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$').exec(t))) {
+    if ((m = new RegExp('^usecase\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + '))(?:\\s+as\\s+(?:\\(([^()]+)\\)|"([^"]+)"|(' + BARE + ')))?\\s*(?:<<[^>]*>>)?\\s*(?:#\\S+)?$', 'i').exec(t))) {
       var nm2 = m[1] || m[2] || m[3];
       var al2 = m[4] || m[5] || m[6];
       declare('usecase', al2 || nm2, nm2, ln);
@@ -232,8 +232,11 @@ P.renderUsecase = function (model, M, meta) {
 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges, containers: containers,
+    overrides: meta && meta.posOverrides,
     dir: 'LR', gapNode: 30, gapRank: 90, gapComp: 50
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   lay.rects.forEach(function (rc, cid) {
@@ -266,11 +269,11 @@ P.renderUsecase = function (model, M, meta) {
 
   model.els.forEach(function (e) {
     var p = lay.pos.get(e.id);
-    if (p) out += boxes.get(e.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(e.id, e.line, p.x, p.y, !containedIds.has(e.id), boxes.get(e.id).draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += boxes.get(n.id).draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, boxes.get(n.id).draw(p.x, p.y));
   });
 
   return { body: out, w: lay.w + 8, h: lay.h + 8 };

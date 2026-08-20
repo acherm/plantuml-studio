@@ -22,10 +22,15 @@ P.parseClass = function (lines, meta) {
   function getClass(id, ln, kind) {
     var c = classes.get(id);
     if (!c) {
-      c = { id: id, display: id, kind: kind || 'class', stereo: null, generics: null,
-            members: [], line: ln, implicit: !kind, pkg: curPkg() ? curPkg().id : null };
+      /* always implicit here — even when a relation hints at a kind (e.g. an
+         implements target is presumably an interface), the user never wrote
+         an actual declaration, so a later explicit one must still be able
+         to claim this id without triggering a "declared twice" error */
+      var guessedKind = kind || 'class';
+      c = { id: id, display: id, kind: guessedKind, stereo: null, generics: null,
+            members: [], line: ln, implicit: true, pkg: curPkg() ? curPkg().id : null };
       classes.set(id, c); order.push(c);
-      if (!kind) D.push(P.d('info', ln, "'" + id + "' is not declared — implicitly created as a class"));
+      D.push(P.d('info', ln, "'" + id + "' is not declared — implicitly created as " + (guessedKind === 'interface' ? 'an interface' : 'a class')));
       if (curPkg()) curPkg().members.push(id);
     }
     return c;
@@ -87,7 +92,7 @@ P.parseClass = function (lines, meta) {
 
     if (cur) {
       /* a new declaration inside an open body ⇒ a '}' is missing above */
-      if (/^(abstract\s+class|abstract\s|class\s|interface\s|enum\s|annotation\s|entity\s|struct\s|package\s|namespace\s|object\s)/.test(t)) {
+      if (/^(abstract\s+class|abstract\s|class\s|interface\s|enum\s|annotation\s|entity\s|struct\s|package\s|namespace\s|object\s)/i.test(t)) {
         D.push(P.d('error', ln, "Declaration inside the body of '" + cur.id + "' — did you forget '}' before this line? (block opened at line " + curOpenLine + ')'));
         cur = null;
         i--; /* reprocess this line as a top-level statement */
@@ -101,7 +106,7 @@ P.parseClass = function (lines, meta) {
     }
 
     /* package / namespace */
-    if ((m = /^(?:package|namespace)\s+(?:"([^"]+)"|([\w.$]+))(?:\s+<<[^>]*>>)?(?:\s+#\S+)?\s*(\{)?\s*$/.exec(t))) {
+    if ((m = /^(?:package|namespace)\s+(?:"([^"]+)"|([\w.$]+))(?:\s+<<[^>]*>>)?(?:\s+#\S+)?\s*(\{)?\s*$/i.exec(t))) {
       var pname = m[1] || m[2];
       var pkg = { id: '@pkg' + packages.length + ':' + pname, label: pname, members: [], line: ln, parent: curPkg() ? curPkg().id : null };
       packages.push(pkg);
@@ -112,8 +117,8 @@ P.parseClass = function (lines, meta) {
     }
 
     /* declaration */
-    if ((m = /^(abstract\s+class|abstract|class|interface|enum|annotation|entity|struct)\s+(.+)$/.exec(t))) {
-      var kind = KINDMAP[m[1].replace(/\s+/g, ' ')];
+    if ((m = /^(abstract\s+class|abstract|class|interface|enum|annotation|entity|struct)\s+(.+)$/i.exec(t))) {
+      var kind = KINDMAP[m[1].replace(/\s+/g, ' ').toLowerCase()];
       var rest = m[2], mm2;
       var name = null, alias = null, display = null, generics = null, stereo = null;
       var ext = [], impl = [], opensBrace = false, bad = false;
@@ -125,12 +130,12 @@ P.parseClass = function (lines, meta) {
         continue;
       }
       while (rest) {
-        if ((mm2 = new RegExp('^as\\s+(' + NAME + ')\\s*(.*)$').exec(rest))) { alias = mm2[1]; rest = mm2[2]; }
-        else if ((mm2 = /^as\s+"([^"]+)"\s*(.*)$/.exec(rest))) { display = mm2[1]; rest = mm2[2]; }
+        if ((mm2 = new RegExp('^as\\s+(' + NAME + ')\\s*(.*)$', 'i').exec(rest))) { alias = mm2[1]; rest = mm2[2]; }
+        else if ((mm2 = /^as\s+"([^"]+)"\s*(.*)$/i.exec(rest))) { display = mm2[1]; rest = mm2[2]; }
         else if ((mm2 = /^<<\s*([^>]*?)\s*>>\s*(.*)$/.exec(rest))) { stereo = mm2[1]; rest = mm2[2]; }
         else if ((mm2 = /^#[\w|\\\/;:.-]+\s*(.*)$/.exec(rest))) { rest = mm2[1]; }
-        else if ((mm2 = new RegExp('^extends\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$').exec(rest))) { ext = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
-        else if ((mm2 = new RegExp('^implements\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$').exec(rest))) { impl = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
+        else if ((mm2 = new RegExp('^extends\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$', 'i').exec(rest))) { ext = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
+        else if ((mm2 = new RegExp('^implements\\s+(' + NAME + '(?:\\s*,\\s*' + NAME + ')*)\\s*(.*)$', 'i').exec(rest))) { impl = mm2[1].split(/\s*,\s*/); rest = mm2[2]; }
         else if (rest === '{' || rest === '{}') { opensBrace = rest === '{'; rest = ''; }
         else {
           D.push(P.d('error', ln, 'Unexpected "' + rest + '" in ' + m[1] + ' declaration'));
@@ -239,7 +244,7 @@ P.parseObject = function (lines, meta) {
     }
     if (cur) { cur.fields.push(t); continue; }
 
-    if ((m = new RegExp('^object\\s+(?:"([^"]+)"\\s+as\\s+(' + NAME + ')|"([^"]+)"|(' + NAME + '))(?:\\s+<<[^>]*>>)?(?:\\s+#\\S+)?\\s*(\\{)?\\s*$').exec(t))) {
+    if ((m = new RegExp('^object\\s+(?:"([^"]+)"\\s+as\\s+(' + NAME + ')|"([^"]+)"|(' + NAME + '))(?:\\s+<<[^>]*>>)?(?:\\s+#\\S+)?\\s*(\\{)?\\s*$', 'i').exec(t))) {
       var id = m[2] || m[3] || m[4];
       var display = m[1] || m[3] || m[4];
       var ex = objects.get(id);
@@ -249,7 +254,7 @@ P.parseObject = function (lines, meta) {
       if (m[5]) { cur = o; curOpenLine = ln; }
       continue;
     }
-    if (/^map\b/.test(t)) {
+    if (/^map\b/i.test(t)) {
       D.push(P.d('warning', ln, 'map (table) objects are not supported — block ignored'));
       if (/\{\s*$/.test(t)) mapSkip = 1;
       continue;
@@ -428,8 +433,11 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
   var lay = P.layout.graph({
     nodes: specNodes, edges: specEdges,
     containers: containers,
+    overrides: opts && opts.posOverrides,
     dir: 'TB', gapNode: 44, gapRank: 72, gapComp: 56
   });
+  var containedIds = new Set();
+  containers.forEach(function (c) { (c.members || []).forEach(function (m) { containedIds.add(m); }); });
 
   var out = '';
   /* containers first (behind) */
@@ -485,11 +493,11 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
 
   nodes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += n.box.draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, !containedIds.has(n.id), n.box.draw(p.x, p.y));
   });
   notes.forEach(function (n) {
     var p = lay.pos.get(n.id);
-    if (p) out += n.box.draw(p.x, p.y);
+    if (p) out += P.S.wrapNode(n.id, n.line, p.x, p.y, true, n.box.draw(p.x, p.y));
   });
 
   /* recompute extent (self loops / labels can stick out a bit) */
@@ -497,8 +505,8 @@ function renderBoxDiagram(nodes, edges, containers, notes, noteAttach, M, opts) 
 }
 
 P.renderClass = function (model, M, meta) {
-  var nodes = model.classes.map(function (c) { return { id: c.id, box: buildBox(c, M, 'class') }; });
-  var notes = model.notes.map(function (n) { return { id: n.id, box: buildNote(n, M), target: n.target, side: n.side }; });
+  var nodes = model.classes.map(function (c) { return { id: c.id, line: c.line, box: buildBox(c, M, 'class') }; });
+  var notes = model.notes.map(function (n) { return { id: n.id, line: n.line, box: buildNote(n, M), target: n.target, side: n.side }; });
   var attach = [];
   model.notes.forEach(function (n) {
     if (n.target && model.byId.has(n.target)) attach.push({ from: n.id, to: n.target, side: n.side });
@@ -509,17 +517,17 @@ P.renderClass = function (model, M, meta) {
   var containers = model.packages.map(function (p) {
     return { id: p.id, label: p.label, members: p.members.slice(), padX: 18, padTop: 34, padBottom: 16 };
   });
-  return renderBoxDiagram(nodes, model.relations, containers, notes, attach, M, {});
+  return renderBoxDiagram(nodes, model.relations, containers, notes, attach, M, { posOverrides: meta && meta.posOverrides });
 };
 
 P.renderObject = function (model, M, meta) {
-  var nodes = model.objects.map(function (o) { return { id: o.id, box: buildBox(o, M, 'object') }; });
-  var notes = model.notes.map(function (n) { return { id: n.id, box: buildNote(n, M), target: n.target, side: n.side }; });
+  var nodes = model.objects.map(function (o) { return { id: o.id, line: o.line, box: buildBox(o, M, 'object') }; });
+  var notes = model.notes.map(function (n) { return { id: n.id, line: n.line, box: buildNote(n, M), target: n.target, side: n.side }; });
   var attach = [];
   model.notes.forEach(function (n) {
     if (n.target) attach.push({ from: n.id, to: n.target, side: n.side });
   });
-  return renderBoxDiagram(nodes, model.links, [], notes, attach, M, {});
+  return renderBoxDiagram(nodes, model.links, [], notes, attach, M, { posOverrides: meta && meta.posOverrides });
 };
 
 P.buildNote = buildNote; /* reused by other renderers */
