@@ -154,6 +154,32 @@ P.renameIdentifier = function (text, oldId, newId) {
   return { text: out };
 };
 
+/* Renames a free-text label — the way most use cases and actors are
+   actually written: `(Borrow a book)`, `usecase "Borrow a book"`,
+   `:Some Actor:` — where the *label itself* is the identity (no separate
+   bare identifier exists to word-boundary-match, and the new name is
+   typically not identifier-shaped either, e.g. "Return a book"). Replaces
+   the label wherever it appears inside (...), "...", or :...: delimiters. */
+P.renameLabel = function (text, oldLabel, newLabel) {
+  text = String(text == null ? '' : text);
+  if (!oldLabel || !newLabel || oldLabel === newLabel) return { text: text };
+  if (/[():"]/.test(newLabel)) return { error: 'A name can\'t contain (, ), ", or :' };
+  var esc = oldLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var changed = false;
+  function sub(re, wrap) {
+    return function (line) { return line.replace(re, function () { changed = true; return wrap; }); };
+  }
+  var out = text.split(/\r\n|\r|\n/).map(function (line) {
+    if (/^\s*'/.test(line)) return line;
+    line = sub(new RegExp('\\(' + esc + '\\)', 'g'), '(' + newLabel + ')')(line);
+    line = sub(new RegExp(':' + esc + ':', 'g'), ':' + newLabel + ':')(line);
+    line = sub(new RegExp('"' + esc + '"', 'g'), '"' + newLabel + '"')(line);
+    return line;
+  }).join('\n');
+  if (!changed) return { error: "'" + oldLabel + "' was not found in the document." };
+  return { text: out };
+};
+
 /* ---------------- preprocessing ---------------- */
 /* Strips comments, handles @startuml/@enduml, consumes global directives.
    Returns {lines:[{n,text}], meta, diagnostics} */
@@ -2793,6 +2819,99 @@ P.completionsFor = function (ctx, type, idents) {
 
 })(PUML);
 
+/* PlantUML Studio — a minimal, dependency-free ZIP writer (STORE method,
+   i.e. no compression — the generated projects are small text files, so
+   there's nothing to gain from DEFLATE and a lot of complexity to avoid).
+   Pure JS, no DOM; only needs TextEncoder, which every target environment
+   here (browsers + Node's test runner) provides globally. */
+'use strict';
+(function (P) {
+
+var CRC_TABLE = (function () {
+  var t = new Array(256);
+  for (var n = 0; n < 256; n++) {
+    var c = n;
+    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  var crc = 0xFFFFFFFF;
+  for (var i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+P.crc32 = crc32;
+
+function u16(n) { return [n & 0xFF, (n >>> 8) & 0xFF]; }
+function u32(n) { return [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]; }
+
+/* files: [{name, data: string|Uint8Array}] — name uses '/' as the path
+   separator regardless of platform, per the ZIP spec. Returns a Uint8Array
+   of the complete archive. Timestamps are fixed at the MS-DOS epoch
+   (1980-01-01): the exact time a generated file was zipped has no meaning
+   here, and a fixed stamp keeps the output byte-identical for identical
+   input, which is easier to test and to diff. */
+P.makeZip = function (files) {
+  var enc = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+  function toBytes(s) {
+    if (s instanceof Uint8Array) return s;
+    if (enc) return enc.encode(String(s));
+    /* Node < 11 fallback, not expected to be hit in practice */
+    return new Uint8Array(Buffer.from(String(s), 'utf8'));
+  }
+  var DOS_TIME = 0, DOS_DATE = 0x21;
+  var localChunks = [], centralChunks = [], offset = 0, count = 0;
+
+  files.forEach(function (f) {
+    var name = String(f.name).replace(/\\/g, '/').replace(/^\/+/, '');
+    var nameBytes = toBytes(name);
+    var dataBytes = toBytes(f.data);
+    var crc = crc32(dataBytes);
+    var size = dataBytes.length;
+
+    var local = [].concat(
+      u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(DOS_TIME), u16(DOS_DATE),
+      u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0)
+    );
+    var localBytes = new Uint8Array(local.length + nameBytes.length + dataBytes.length);
+    localBytes.set(local, 0);
+    localBytes.set(nameBytes, local.length);
+    localBytes.set(dataBytes, local.length + nameBytes.length);
+    localChunks.push(localBytes);
+
+    var central = [].concat(
+      u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(DOS_TIME), u16(DOS_DATE),
+      u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0),
+      u32(offset)
+    );
+    var centralBytes = new Uint8Array(central.length + nameBytes.length);
+    centralBytes.set(central, 0);
+    centralBytes.set(nameBytes, central.length);
+    centralChunks.push(centralBytes);
+
+    offset += localBytes.length;
+    count++;
+  });
+
+  var centralStart = offset, centralSize = 0;
+  centralChunks.forEach(function (c) { centralSize += c.length; });
+
+  var eocd = new Uint8Array(u32(0x06054b50).concat(
+    u16(0), u16(0), u16(count), u16(count), u32(centralSize), u32(centralStart), u16(0)
+  ));
+
+  var total = offset + centralSize + eocd.length;
+  var out = new Uint8Array(total);
+  var pos = 0;
+  localChunks.forEach(function (c) { out.set(c, pos); pos += c.length; });
+  centralChunks.forEach(function (c) { out.set(c, pos); pos += c.length; });
+  out.set(eocd, pos);
+  return out;
+};
+
+})(PUML);
+
 /* PlantUML Studio — class diagram -> source code generator.
    Pure JS, no DOM. A tiny Mustache-like template engine (editable, explicit
    text templates — no hidden magic) renders a per-class context built from
@@ -2977,6 +3096,22 @@ function camelToSnake(s) {
 }
 var VIS_JAVA = { '+': 'public ', '-': 'private ', '#': 'protected ', '~': '' };
 
+/* PlantUML multiplicities: "*", "0..*", "1..*", "3", "2..5" -> to-many */
+function isManyCard(card) {
+  if (!card) return false;
+  var s = String(card).trim();
+  if (s.indexOf('*') >= 0) return true;
+  var parts = s.split('..');
+  var n = parseFloat(parts[parts.length - 1]);
+  return !isNaN(n) && n > 1;
+}
+function lowerFirst(s) { return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+function pluralize(s) {
+  if (/[sxz]$/i.test(s) || /[cs]h$/i.test(s)) return s + 'es';
+  if (/[^aeiou]y$/i.test(s)) return s.slice(0, -1) + 'ies';
+  return s + 's';
+}
+
 /* a UML member name is free-form text and may collide with a reserved word
    in the target language (a "return()" operation is a plausible, real
    example) — append '_' the way both language communities conventionally do */
@@ -2988,6 +3123,18 @@ var PY_KEYWORDS = ('False None True and as assert async await break class contin
   'finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self').split(' ');
 function escJava(name) { return JAVA_KEYWORDS.indexOf(name) >= 0 ? name + '_' : name; }
 function escPy(name) { return PY_KEYWORDS.indexOf(name) >= 0 ? name + '_' : name; }
+
+/* common JDK types a class diagram will name as a bare attribute/parameter
+   type (Date, BigDecimal, ...) but that need an explicit import to compile —
+   unlike sibling generated classes, which Java resolves via the classpath
+   with no import needed at all */
+var JAVA_WELLKNOWN_IMPORTS = {
+  Date: 'java.util.Date', LocalDate: 'java.time.LocalDate', LocalDateTime: 'java.time.LocalDateTime',
+  LocalTime: 'java.time.LocalTime', Instant: 'java.time.Instant', Duration: 'java.time.Duration',
+  Optional: 'java.util.Optional', UUID: 'java.util.UUID',
+  BigDecimal: 'java.math.BigDecimal', BigInteger: 'java.math.BigInteger'
+};
+function baseTypeNames(t) { return String(t || '').split(/[<>,\[\]\s]+/).filter(Boolean); }
 
 /* ============================ CLASS MODEL -> GENERATION MODEL ============================ */
 /* One entry per top-level (non-implicit) class/interface/enum/etc. Attaches
@@ -3004,6 +3151,32 @@ P.classGenModel = function (model) {
     else return;
     if (rel.cls.style === 'dashed') { (interfacesOf[childId] = interfacesOf[childId] || []).push(parentId); }
     else { superOf[childId] = parentId; }
+  });
+
+  /* non-hierarchy relations become fields on the owning side:
+     - composition/aggregation: the diamond end owns a reference to the other
+     - directed association (A --> B): A owns a reference to B
+     - plain "--" (no arrowhead at all): UML leaves navigability unspecified,
+       so both ends get a reference to each other
+     - dependency (..>, a single open arrowhead, dashed, no diamond): skipped
+       — a dependency is "uses" (e.g. a parameter type), not a stored field */
+  var assocFieldsOf = {};
+  function addAssocField(ownerId, targetId, cardOnTargetSide, label) {
+    (assocFieldsOf[ownerId] = assocFieldsOf[ownerId] || []).push({ targetId: targetId, many: isManyCard(cardOnTargetSide), label: label || null });
+  }
+  (model.relations || []).forEach(function (rel) {
+    var c = rel.cls;
+    if (!c || c.isHierarchy) return;
+    if (c.decoL === 'diamond' || c.decoL === 'odiamond') { addAssocField(rel.from, rel.to, rel.cardR, rel.label); return; }
+    if (c.decoR === 'diamond' || c.decoR === 'odiamond') { addAssocField(rel.to, rel.from, rel.cardL, rel.label); return; }
+    var isDependency = c.style === 'dashed' && ((c.decoL === 'open' && c.decoR === 'none') || (c.decoR === 'open' && c.decoL === 'none'));
+    if (isDependency) return;
+    if (c.decoR === 'open' && c.decoL === 'none') { addAssocField(rel.from, rel.to, rel.cardR, rel.label); return; }
+    if (c.decoL === 'open' && c.decoR === 'none') { addAssocField(rel.to, rel.from, rel.cardL, rel.label); return; }
+    if (c.decoL === 'none' && c.decoR === 'none') {
+      addAssocField(rel.from, rel.to, rel.cardR, rel.label);
+      addAssocField(rel.to, rel.from, rel.cardL, rel.label);
+    }
   });
 
   /* PASS 1: each class's own attributes/methods, keyed by model id (not yet
@@ -3064,6 +3237,42 @@ P.classGenModel = function (model) {
     };
   });
 
+  /* PASS 1.5: merge association-derived fields into each class's own
+     attributes — MUST happen before any inheritance threading below, since
+     a subclass's super(...) call needs to know about fields an ancestor
+     picked up from an association, not just the ones it declared itself */
+  Object.keys(infoById).forEach(function (id) {
+    var info = infoById[id];
+    var existingNames = {};
+    info.attributes.forEach(function (a) { existingNames[a.name] = true; });
+    var assocAttrs = [], seenAssoc = {};
+    (assocFieldsOf[id] || []).forEach(function (cand) {
+      var targetInfo = infoById[cand.targetId];
+      var targetName = targetInfo ? targetInfo.name : (byId.has(cand.targetId) ? byId.get(cand.targetId).display : null);
+      if (!targetName) return;
+      var base = lowerFirst(targetName);
+      var fieldName = escJava(cand.many ? pluralize(base) : base);
+      if (existingNames[fieldName] || seenAssoc[fieldName]) return;
+      seenAssoc[fieldName] = true;
+      var pyParamName = escPy(camelToSnake(fieldName));
+      /* a trailing/leading < or > in the label is just a PlantUML "read the
+         label this way" rendering hint, not part of the text itself */
+      var note = cand.label ? cand.label.replace(/\s*[<>]\s*$/, '').replace(/^\s*[<>]\s*/, '').trim() : null;
+      assocAttrs.push({
+        name: fieldName, pyName: '_' + pyParamName, pyParamName: pyParamName,
+        visKw: 'private ', isStatic: false,
+        type: cand.many ? 'List<' + targetName + '>' : targetName,
+        pyType: cand.many ? 'List[' + targetName + ']' : targetName,
+        hasDefault: false, defaultValue: null,
+        isCollection: cand.many, assocNote: note || null
+      });
+    });
+    if (assocAttrs.length) {
+      info.attributes = info.attributes.concat(assocAttrs);
+      info.instanceAttrs = info.instanceAttrs.concat(assocAttrs);
+    }
+  });
+
   /* every method a CONCRETE descendant of `id` must eventually provide a body
      for: the class/interface's own bodiless methods, plus whatever its own
      ancestors still require and it doesn't itself override with a real body */
@@ -3091,7 +3300,9 @@ P.classGenModel = function (model) {
     var chain = [], cur = infoById[id] && infoById[id].superId, seen = {};
     var supers = [];
     while (cur && infoById[cur] && !seen[cur]) { seen[cur] = true; supers.unshift(cur); cur = infoById[cur].superId; }
-    supers.forEach(function (sid) { chain = chain.concat(infoById[sid].instanceAttrs); });
+    supers.forEach(function (sid) {
+      chain = chain.concat(infoById[sid].instanceAttrs.filter(function (a) { return !a.isCollection; }));
+    });
     return chain;
   }
 
@@ -3114,8 +3325,13 @@ P.classGenModel = function (model) {
       });
     }
 
+    /* attributes/instanceAttrs already include association-derived fields —
+       merged in PASS 1.5, before collectInheritedAttrs (below) could need them */
+    var attributes = info.attributes, instanceAttrs = info.instanceAttrs, staticAttrs = info.staticAttrs;
+
     var inheritedAttrs = (info.isEnum || info.isInterface) ? [] : collectInheritedAttrs(id);
-    var allCtorAttrs = inheritedAttrs.concat(info.instanceAttrs);
+    var ctorInstanceAttrs = instanceAttrs.filter(function (a) { return !a.isCollection; });
+    var allCtorAttrs = inheritedAttrs.concat(ctorInstanceAttrs);
     var hasSuperCtorArgs = !!(info.superName && inheritedAttrs.length);
     var needsAbcHere = info.isInterface || methods.some(function (m) { return m.bodiless; });
     var pyBases = (info.superName ? [info.superName] : []).concat(info.ifaceNames);
@@ -3138,6 +3354,16 @@ P.classGenModel = function (model) {
       pyImports.push({ module: camelToSnake(otherName), name: otherName });
     });
 
+    var javaImports = [], seenJI = {};
+    attributes.concat(methods.reduce(function (a, m) { return a.concat(m.params, [{ type: m.returnType }]); }, []))
+      .forEach(function (x) {
+        baseTypeNames(x.type).forEach(function (n) {
+          var imp = JAVA_WELLKNOWN_IMPORTS[n];
+          if (imp && !seenJI[imp]) { seenJI[imp] = true; javaImports.push(imp); }
+        });
+      });
+    javaImports.sort();
+
     return {
       name: info.name, kind: info.kind,
       isClass: !info.isEnum && !info.isInterface && !info.isAbstract,
@@ -3148,15 +3374,18 @@ P.classGenModel = function (model) {
       implementsClause: info.ifaceNames.length ? ' implements ' + info.ifaceNames.join(', ') : '',
       pyBases: pyBases, pyBasesStr: pyBases.join(', '), hasPyBases: pyBases.length > 0,
       needsAbc: needsAbcHere,
-      needsTyping: info.attributes.concat(methods.reduce(function (a, m) { return a.concat(m.params); }, []))
+      needsTyping: attributes.concat(methods.reduce(function (a, m) { return a.concat(m.params); }, []))
         .some(function (x) { return /^(List|Set|Dict)\[/.test(x.pyType); }),
-      attributes: info.attributes, instanceAttrs: info.instanceAttrs, staticAttrs: info.staticAttrs,
-      hasAttributes: info.attributes.length > 0, hasInstanceAttrs: info.instanceAttrs.length > 0,
+      needsJavaCollections: instanceAttrs.some(function (a) { return a.isCollection; }),
+      javaImports: javaImports,
+      hasAnyJavaImports: javaImports.length > 0 || instanceAttrs.some(function (a) { return a.isCollection; }),
+      attributes: attributes, instanceAttrs: instanceAttrs, staticAttrs: staticAttrs,
+      hasAttributes: attributes.length > 0, hasInstanceAttrs: instanceAttrs.length > 0,
       methods: methods, hasMethods: methods.length > 0,
       enumValues: info.enumValues, enumValuesStr: info.enumValues.join(', '),
       pyImports: pyImports, hasPyImports: pyImports.length > 0,
       hasSuperCtorArgs: hasSuperCtorArgs,
-      hasCtorBody: hasSuperCtorArgs || info.instanceAttrs.length > 0,
+      hasCtorBody: hasSuperCtorArgs || instanceAttrs.length > 0,
       superCallArgsStr: inheritedAttrs.map(function (a) { return a.name; }).join(', '),
       pySuperCallArgsStr: inheritedAttrs.map(function (a) { return a.pyParamName; }).join(', '),
       javaCtorParamsStr: allCtorAttrs.map(function (a) { return a.type + ' ' + a.name; }).join(', '),
@@ -3175,13 +3404,23 @@ P.JAVA_TEMPLATE = [
   '    {{enumValuesStr}}',
   '}',
   '{{else}}',
+  '{{#if needsJavaCollections}}',
+  'import java.util.ArrayList;',
+  'import java.util.List;',
+  '{{/if}}',
+  '{{#each javaImports}}',
+  'import {{.}};',
+  '{{/each}}',
+  '{{#if hasAnyJavaImports}}',
+  '',
+  '{{/if}}',
   'public {{#if isAbstract}}abstract {{/if}}{{#if isInterface}}interface{{else}}class{{/if}} {{name}}{{extendsClause}}{{implementsClause}} {',
   '',
   '{{#each staticAttrs}}',
   '    {{visKw}}static {{type}} {{name}}{{#if hasDefault}} = {{defaultValue}}{{/if}};',
   '{{/each}}',
   '{{#each instanceAttrs}}',
-  '    {{visKw}}{{type}} {{name}}{{#if hasDefault}} = {{defaultValue}}{{/if}};',
+  '    {{visKw}}{{type}} {{name}}{{#if hasDefault}} = {{defaultValue}}{{/if}};{{#if assocNote}} // {{assocNote}}{{/if}}',
   '{{/each}}',
   '',
   '{{#unless isInterface}}',
@@ -3190,7 +3429,11 @@ P.JAVA_TEMPLATE = [
   '        super({{superCallArgsStr}});',
   '{{/if}}',
   '{{#each instanceAttrs}}',
+  '{{#if isCollection}}',
+  '        this.{{name}} = new ArrayList<>();',
+  '{{else}}',
   '        this.{{name}} = {{name}};',
+  '{{/if}}',
   '{{/each}}',
   '    }',
   '',
@@ -3240,7 +3483,11 @@ P.PYTHON_TEMPLATE = [
   '        super().__init__({{pySuperCallArgsStr}})',
   '{{/if}}',
   '{{#each instanceAttrs}}',
-  '        self.{{pyName}} = {{pyParamName}}',
+  '{{#if isCollection}}',
+  '        self.{{pyName}}: {{pyType}} = []{{#if assocNote}}  # {{assocNote}}{{/if}}',
+  '{{else}}',
+  '        self.{{pyName}} = {{pyParamName}}{{#if assocNote}}  # {{assocNote}}{{/if}}',
+  '{{/if}}',
   '{{/each}}',
   '{{#unless hasCtorBody}}',
   '        pass',
@@ -3268,6 +3515,115 @@ P.PYTHON_TEMPLATE = [
   ''
 ].join('\n');
 
+/* ============================ PROJECT SCAFFOLDING (Maven / uv) ============================ */
+/* These four are templates too (Mustache-like, same engine) — editable the
+   same way as the class templates, just not exposed in the template editor
+   pane by default since there's no per-class "preview" for them. */
+P.POM_XML_TEMPLATE = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<project xmlns="http://maven.apache.org/POM/4.0.0"',
+  '         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+  '         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">',
+  '  <modelVersion>4.0.0</modelVersion>',
+  '',
+  '  <groupId>com.example</groupId>',
+  '  <artifactId>{{slug}}</artifactId>',
+  '  <version>1.0-SNAPSHOT</version>',
+  '  <packaging>jar</packaging>',
+  '',
+  '  <properties>',
+  '    <maven.compiler.release>17</maven.compiler.release>',
+  '    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>',
+  '  </properties>',
+  '',
+  '  <build>',
+  '    <finalName>{{slug}}</finalName>',
+  '  </build>',
+  '</project>',
+  ''
+].join('\n');
+var JAVA_GITIGNORE = 'target/\n*.class\n.idea/\n*.iml\n';
+P.JAVA_README_TEMPLATE = [
+  '# {{slug}}',
+  '',
+  'Generated by [PlantUML Studio](https://blog.mathieuacher.com/plantuml-studio/) from a class diagram.',
+  '',
+  '## Build & run',
+  '',
+  '```sh',
+  'mvn compile',
+  '```',
+  '',
+  'Classes (default package, `src/main/java/`):',
+  '',
+  '{{#each classNames}}',
+  '- `{{.}}`',
+  '{{/each}}',
+  '',
+  'Method bodies are stubs (`throw new UnsupportedOperationException(...)`) — fill them in.',
+  ''
+].join('\n');
+
+P.PYPROJECT_TOML_TEMPLATE = [
+  '[project]',
+  'name = "{{slug}}"',
+  'version = "0.1.0"',
+  'description = "Generated by PlantUML Studio from a class diagram"',
+  'readme = "README.md"',
+  'requires-python = ">=3.12"',
+  'dependencies = []',
+  ''
+].join('\n');
+var PY_GITIGNORE = '# Python-generated files\n__pycache__/\n*.py[oc]\nbuild/\ndist/\nwheels/\n*.egg-info\n\n# Virtual environments\n.venv\n';
+P.PY_README_TEMPLATE = [
+  '# {{slug}}',
+  '',
+  'Generated by [PlantUML Studio](https://blog.mathieuacher.com/plantuml-studio/) from a class diagram.',
+  '',
+  '## Run',
+  '',
+  '```sh',
+  'uv run main.py',
+  '```',
+  '',
+  '`uv` downloads and pins the right Python version and creates `.venv`',
+  'automatically — no separate install step needed.',
+  '',
+  'Classes:',
+  '',
+  '{{#each classNames}}',
+  '- `{{.}}`',
+  '{{/each}}',
+  '',
+  'Method bodies are stubs (`raise NotImplementedError(...)`) — fill them in.',
+  ''
+].join('\n');
+P.PY_MAIN_TEMPLATE = [
+  '{{#if firstClass}}',
+  'from {{firstModule}} import {{firstClass}}',
+  '',
+  '',
+  '{{/if}}',
+  'def main():',
+  '{{#if firstClass}}',
+  '    # TODO: replace with real arguments',
+  '    # example = {{firstClass}}(...)',
+  '    pass',
+  '{{else}}',
+  '    pass',
+  '{{/if}}',
+  '',
+  '',
+  'if __name__ == "__main__":',
+  '    main()',
+  ''
+].join('\n');
+
+function slugify(name) {
+  var s = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return s || 'plantuml-project';
+}
+
 /* ============================ ENTRY POINT ============================ */
 /* Returns [{className, filename, code}] — one file per top-level
    class/interface/enum. lang: 'java' | 'python'. */
@@ -3279,6 +3635,44 @@ P.genCode = function (model, template, lang) {
     return { className: c.name, filename: filename, code: code };
   });
 };
+
+/* A full, buildable project: pom.xml + src/main/java/*.java (Maven), or
+   pyproject.toml + *.py + main.py (uv — a flat "app" layout, the same one
+   `uv init` produces without --package, so uv run/uv sync work unmodified).
+   Returns {zipName, files: [{path, content}]}. */
+P.genProject = function (model, template, lang, projectName) {
+  var slug = slugify(projectName);
+  var classFiles = P.genCode(model, template, lang);
+  var classNames = classFiles.map(function (f) { return f.className; });
+  var files = [];
+  if (lang === 'python') {
+    files.push({ path: 'pyproject.toml', content: P.tmplRender(P.PYPROJECT_TOML_TEMPLATE, { slug: slug }) });
+    files.push({ path: '.python-version', content: '3.12\n' });
+    files.push({ path: '.gitignore', content: PY_GITIGNORE });
+    files.push({ path: 'README.md', content: P.tmplRender(P.PY_README_TEMPLATE, { slug: slug, classNames: classNames }) });
+    /* pick a concrete, instantiable class for the illustrative import — an
+       interface or abstract class would make a misleading first example */
+    var gm = P.classGenModel(model);
+    var concreteIdx = -1;
+    for (var i = 0; i < gm.classes.length; i++) { if (gm.classes[i].isClass) { concreteIdx = i; break; } }
+    var first = classFiles[concreteIdx >= 0 ? concreteIdx : 0];
+    files.push({ path: 'main.py', content: P.tmplRender(P.PY_MAIN_TEMPLATE, first ? { firstClass: first.className, firstModule: camelToSnake(first.className) } : {}) });
+    classFiles.forEach(function (f) { files.push({ path: f.filename, content: f.code }); });
+  } else {
+    files.push({ path: 'pom.xml', content: P.tmplRender(P.POM_XML_TEMPLATE, { slug: slug }) });
+    files.push({ path: '.gitignore', content: JAVA_GITIGNORE });
+    files.push({ path: 'README.md', content: P.tmplRender(P.JAVA_README_TEMPLATE, { slug: slug, classNames: classNames }) });
+    classFiles.forEach(function (f) { files.push({ path: 'src/main/java/' + f.filename, content: f.code }); });
+  }
+  return { zipName: slug + '-' + lang + '.zip', files: files };
+};
+
+/* Convenience: build the project AND zip it in one call. */
+P.genProjectZip = function (model, template, lang, projectName) {
+  var proj = P.genProject(model, template, lang, projectName);
+  return { zipName: proj.zipName, data: P.makeZip(proj.files.map(function (f) { return { name: f.path, data: f.content }; })) };
+};
+
 P.camelToSnake = camelToSnake;
 P.toPyType = toPyType;
 

@@ -757,6 +757,30 @@ select.btn { padding: 7px 8px; }
   overflow: auto;
 }
 .codegen-output { background: var(--surface); cursor: text; }
+.codegen-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.codegen-footer label { color: var(--muted); }
+.codegen-footer input {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--ink);
+  font: 13px 'IBM Plex Sans', sans-serif;
+  padding: 5px 9px;
+  border-radius: 6px;
+  outline: none;
+}
+.codegen-footer input:focus { border-color: var(--accent); }
+.mini-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; margin-left: auto; }
+.mini-btn.primary:hover { border-color: var(--accent); color: #fff; filter: brightness(1.08); }
 .codegen-note {
   padding: 8px 18px;
   font-size: 11.5px;

@@ -154,6 +154,32 @@ P.renameIdentifier = function (text, oldId, newId) {
   return { text: out };
 };
 
+/* Renames a free-text label — the way most use cases and actors are
+   actually written: `(Borrow a book)`, `usecase "Borrow a book"`,
+   `:Some Actor:` — where the *label itself* is the identity (no separate
+   bare identifier exists to word-boundary-match, and the new name is
+   typically not identifier-shaped either, e.g. "Return a book"). Replaces
+   the label wherever it appears inside (...), "...", or :...: delimiters. */
+P.renameLabel = function (text, oldLabel, newLabel) {
+  text = String(text == null ? '' : text);
+  if (!oldLabel || !newLabel || oldLabel === newLabel) return { text: text };
+  if (/[():"]/.test(newLabel)) return { error: 'A name can\'t contain (, ), ", or :' };
+  var esc = oldLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var changed = false;
+  function sub(re, wrap) {
+    return function (line) { return line.replace(re, function () { changed = true; return wrap; }); };
+  }
+  var out = text.split(/\r\n|\r|\n/).map(function (line) {
+    if (/^\s*'/.test(line)) return line;
+    line = sub(new RegExp('\\(' + esc + '\\)', 'g'), '(' + newLabel + ')')(line);
+    line = sub(new RegExp(':' + esc + ':', 'g'), ':' + newLabel + ':')(line);
+    line = sub(new RegExp('"' + esc + '"', 'g'), '"' + newLabel + '"')(line);
+    return line;
+  }).join('\n');
+  if (!changed) return { error: "'" + oldLabel + "' was not found in the document." };
+  return { text: out };
+};
+
 /* ---------------- preprocessing ---------------- */
 /* Strips comments, handles @startuml/@enduml, consumes global directives.
    Returns {lines:[{n,text}], meta, diagnostics} */

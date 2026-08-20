@@ -494,6 +494,135 @@ var CODEGEN_LIBRARY = [
   });
 }
 
+/* ---------- zip writer ---------- */
+{
+  const zip = P.makeZip([
+    { name: 'a.txt', data: 'hello' },
+    { name: 'dir/b.txt', data: 'world, with a longer string to exercise more than one CRC table byte' },
+    { name: 'empty.txt', data: '' }
+  ]);
+  ok(zip instanceof Uint8Array, 'makeZip returns a Uint8Array');
+  const sig = (zip[0] === 0x50 && zip[1] === 0x4b && zip[2] === 0x03 && zip[3] === 0x04);
+  ok(sig, 'starts with the ZIP local-file-header signature (PK\\x03\\x04)');
+  const eocdSig = [0x50, 0x4b, 0x05, 0x06];
+  let hasEocd = false;
+  for (let i = zip.length - 22; i >= 0; i--) { if (eocdSig.every((b, j) => zip[i + j] === b)) { hasEocd = true; break; } }
+  ok(hasEocd, 'contains an end-of-central-directory record');
+
+  const crcA = P.crc32(new TextEncoder().encode('hello'));
+  eq(crcA, 0x3610a686, 'crc32("hello") matches the well-known reference value');
+
+  const empty = P.makeZip([]);
+  ok(empty instanceof Uint8Array && empty.length === 22, 'an empty file list still produces a valid (EOCD-only) archive');
+}
+
+/* ---------- codegen: project scaffolding (pom.xml / pyproject.toml + zip) ---------- */
+{
+  const res = P.compile('@startuml\nclass Foo {\n  -x: int\n}\n@enduml', { type: 'class' });
+  const javaProj = P.genProject(res.model, P.JAVA_TEMPLATE, 'java', 'My Cool Project!');
+  eq(javaProj.files.find(f => f.path === 'pom.xml') !== undefined, true, 'Java project includes a pom.xml');
+  ok(javaProj.files.find(f => f.path === 'pom.xml').content.includes('<artifactId>my-cool-project</artifactId>'), 'the project name is slugified into the artifactId');
+  ok(javaProj.files.some(f => f.path === 'src/main/java/Foo.java'), 'Java sources live under src/main/java/');
+  eq(javaProj.zipName, 'my-cool-project-java.zip', 'zip filename derives from the slug + language');
+
+  const pyProj = P.genProject(res.model, P.PYTHON_TEMPLATE, 'python', 'My Cool Project!');
+  ok(pyProj.files.find(f => f.path === 'pyproject.toml').content.includes('name = "my-cool-project"'), 'pyproject.toml name is slugified');
+  ok(pyProj.files.some(f => f.path === 'foo.py'), 'Python sources are flat at the project root (matching uv\'s app layout)');
+  ok(pyProj.files.some(f => f.path === '.python-version'), 'Python project pins a Python version for uv');
+  ok(pyProj.files.some(f => f.path === 'main.py'), 'Python project includes a runnable main.py');
+
+  const zipped = P.genProjectZip(res.model, P.JAVA_TEMPLATE, 'java', 'demo');
+  ok(zipped.data instanceof Uint8Array && zipped.data.length > 100, 'genProjectZip produces a non-trivial archive');
+  eq(zipped.zipName, 'demo-java.zip', 'genProjectZip filename matches genProject');
+}
+{
+  /* project scaffolding must never throw across the whole example corpus */
+  P.EXAMPLES.forEach(ex => {
+    const res = P.compile(ex.code, { strict: true });
+    if (res.type !== 'class' || !res.model) return;
+    try {
+      P.genProjectZip(res.model, P.JAVA_TEMPLATE, 'java', ex.name);
+      P.genProjectZip(res.model, P.PYTHON_TEMPLATE, 'python', ex.name);
+      pass++;
+    } catch (e) { fail++; console.error('FAIL: genProjectZip threw on ' + ex.name + ': ' + e.message); }
+  });
+}
+
+/* ---------- codegen: associations (composition/aggregation/plain, incl. inheritance) ---------- */
+{
+  const res = P.compile([
+    '@startuml',
+    'abstract class Media {', '  #title: String', '}',
+    'class Book extends Media {', '  -isbn: String', '}',
+    'class Genre',
+    'class Library {', '  -name: String', '}',
+    'class Loan {', '  -dueDate: Date', '}',
+    'class Member',
+    'Library "1" *-- "0..*" Media : owns',
+    'Media --> Genre',
+    'Member "1" -- "0..*" Loan : borrows >',
+    'Loan "0..*" -- "1" Media',
+    '@enduml'
+  ].join('\n'), { type: 'class' });
+  eq(errs(res).length, 0, 'association source diagram is well-formed');
+
+  const gm = P.classGenModel(res.model);
+  const byName = n => gm.classes.filter(c => c.name === n)[0];
+
+  const lib = byName('Library');
+  const libMedia = lib.instanceAttrs.find(a => a.name === 'medias');
+  ok(!!libMedia, 'composition (owner side) becomes a collection field named after the pluralized target');
+  ok(libMedia.isCollection && libMedia.type === 'List<Media>', 'to-many composition field is List<Media>');
+  eq(libMedia.assocNote, 'owns', 'the relation label becomes the field comment');
+  ok(!lib.javaCtorParamsStr.includes('medias'), 'a to-many field is never a constructor parameter');
+  ok(lib.instanceAttrs.some(a => a.isCollection), 'Library has at least one collection field');
+
+  const media = byName('Media');
+  const mediaGenre = media.instanceAttrs.find(a => a.name === 'genre');
+  ok(!!mediaGenre && !mediaGenre.isCollection && mediaGenre.type === 'Genre', 'directed association (no multiplicity) becomes a single-valued field');
+  ok(media.javaCtorParamsStr.includes('Genre genre'), 'a single-valued association field IS a constructor parameter');
+
+  const book = byName('Book');
+  ok(book.javaCtorParamsStr === 'String title, Genre genre, String isbn', "a subclass's constructor threads the superclass's OWN association field too");
+  ok(book.superCallArgsStr === 'title, genre', 'super(...) forwards exactly the inherited (non-collection) fields, in order');
+
+  const loan = byName('Loan');
+  ok(loan.instanceAttrs.some(a => a.name === 'member' && !a.isCollection), 'plain "--" association: the reverse side also gets a single-valued field');
+  ok(loan.instanceAttrs.some(a => a.name === 'media' && !a.isCollection), 'a class can receive fields from two independent associations');
+  const member = byName('Member');
+  ok(member.instanceAttrs.some(a => a.name === 'loans' && a.isCollection), 'plain "--" association: the to-many side becomes a collection field');
+
+  const java = P.genCode(res.model, P.JAVA_TEMPLATE, 'java');
+  const loanJava = java.find(f => f.className === 'Loan');
+  ok(loanJava.code.includes('import java.util.Date;'), 'a well-known JDK type (Date) used as an attribute gets auto-imported');
+  const bookJava = java.find(f => f.className === 'Book');
+  ok(bookJava.code.includes('super(title, genre);'), 'Book.java calls super with the inherited association field');
+  ok(!/\{\{|\}\}/.test(bookJava.code), 'no leftover template markers');
+  const braceBalance = (bookJava.code.match(/\{/g) || []).length - (bookJava.code.match(/\}/g) || []).length;
+  eq(braceBalance, 0, 'Book.java has balanced braces');
+
+  const py = P.genCode(res.model, P.PYTHON_TEMPLATE, 'python');
+  const bookPy = py.find(f => f.className === 'Book');
+  ok(bookPy.code.includes('super().__init__(title, genre)'), 'book.py chains the association field through super().__init__');
+  const libraryPy = py.find(f => f.className === 'Library');
+  ok(libraryPy.code.includes('self._medias: List[Media] = []'), 'library.py initializes the collection field to an empty, type-hinted list');
+  ok(!/\{\{|\}\}/.test(bookPy.code), 'no leftover template markers');
+}
+{
+  /* dependency (..>) must NOT become a field — it's a "uses", not a "has-a" */
+  const res = P.compile('@startuml\nclass A\nclass B\nA ..> B\n@enduml', { type: 'class' });
+  const gm = P.classGenModel(res.model);
+  const a = gm.classes.filter(c => c.name === 'A')[0];
+  eq(a.instanceAttrs.length, 0, 'a dependency arrow generates no field');
+}
+{
+  /* a self-association (e.g. a linked list / tree) must work */
+  const res = P.compile('@startuml\nclass Node\nNode "1" o-- "0..*" Node : children\n@enduml', { type: 'class' });
+  const gm = P.classGenModel(res.model);
+  const node = gm.classes[0];
+  ok(node.instanceAttrs.some(a => a.name === 'nodes' && a.isCollection && a.type === 'List<Node>'), 'a self-referencing aggregation becomes a self-typed collection field');
+}
+
 /* ---------- graphical editing: text-surgical transforms ---------- */
 {
   const r1 = P.renameIdentifier('@startuml\nclass Car\nCar --> Wheel\n@enduml', 'Car', 'Vehicle');
@@ -515,6 +644,28 @@ var CODEGEN_LIBRARY = [
 
   const r6 = P.renameIdentifier('@startuml\nclass Foobar\n@enduml', 'Foo', 'Baz');
   ok(!!r6.error, 'rename does not match a substring of a longer identifier (word boundary)');
+}
+{
+  /* use case / actor names are usually free natural-language text with no
+     separate bare identifier — renameLabel handles that case */
+  const l1 = P.renameLabel('@startuml\n:Member: --> (Borrow a book)\n(Borrow a book) ..> (Authenticate) : include\n@enduml', 'Borrow a book', 'Check out a book');
+  ok(!l1.error, 'renameLabel succeeds on a parenthesized use-case label');
+  ok(l1.text.includes('(Check out a book)') && !l1.text.includes('(Borrow a book)'), 'every parenthesized occurrence is renamed');
+  ok(l1.text.includes('(Authenticate)'), 'an unrelated use case is left untouched');
+
+  const l2 = P.renameLabel('@startuml\n:Member: --> (Borrow)\n@enduml', 'Member', 'Patron');
+  ok(!l2.error, 'renameLabel succeeds on an actor label');
+  ok(l2.text.includes(':Patron:') && !l2.text.includes(':Member:'), 'the :actor: form is renamed');
+
+  const l3 = P.renameLabel('@startuml\nusecase "Borrow a book" as UC1\nUC1 --> (Other)\n@enduml', 'Borrow a book', 'Return a book');
+  ok(!l3.error, 'renameLabel succeeds on a quoted usecase declaration');
+  ok(l3.text.includes('usecase "Return a book" as UC1'), 'the quoted declaration is renamed; the UC1 alias is untouched');
+
+  const l4 = P.renameLabel('@startuml\n(Borrow a book)\n@enduml', 'Borrow a book', 'Bad(Name)');
+  ok(!!l4.error, 'renameLabel rejects a new name containing ( ) " or :');
+
+  const l5 = P.renameLabel('@startuml\n(Borrow a book)\n@enduml', 'Nope', 'Whatever');
+  ok(!!l5.error, 'renameLabel reports when the old label is not found');
 }
 {
   const empty = P.extractPosOverrides('@startuml\nclass A\n@enduml');

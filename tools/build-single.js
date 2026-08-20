@@ -14,7 +14,7 @@ const extraFile = argOf('--extra');
 const outFile = argOf('--out');
 const brand = argOf('--brand'); /* e.g. "édition cours CPOO": shown as subtitle + appended to <title> */
 
-const CORE_FILES = ['pre.js', 'layout.js', 'classdiag.js', 'sequence.js', 'usecase.js', 'state.js', 'editor.js', 'codegen.js', 'main.js'];
+const CORE_FILES = ['pre.js', 'layout.js', 'classdiag.js', 'sequence.js', 'usecase.js', 'state.js', 'editor.js', 'zip.js', 'codegen.js', 'main.js'];
 let core = CORE_FILES.map(f => fs.readFileSync(path.join(root, 'src/core', f), 'utf8')).join('\n');
 if (extraFile) core += '\n' + fs.readFileSync(extraFile, 'utf8');
 

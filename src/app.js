@@ -395,7 +395,12 @@ function startNodeRename(g) {
     var newName = inp.value.trim();
     inp.remove();
     if (!newName || newName === id) return;
-    var result = PUML.renameIdentifier(elCode.value, id, newName);
+    /* class/object/state names are bare identifiers, word-boundary renamed;
+       use-case/actor names are usually free natural-language text
+       (`(Borrow a book)`, `:Some Actor:`) with no separate identifier to
+       match, so they need the label-delimiter-aware transform instead */
+    var isPlainIdentifier = /^[A-Za-z_$][\w.$]*$/.test(id);
+    var result = isPlainIdentifier ? PUML.renameIdentifier(elCode.value, id, newName) : PUML.renameLabel(elCode.value, id, newName);
     if (result.error) { toast(result.error); return; }
     elCode.value = result.text;
     compileNow();
@@ -572,7 +577,7 @@ function anchorDownload(name, blob) {
 }
 /* Save a file. In the Claude artifact viewer plain downloads are inert, so the
    `downloads` capability is tried first; locally we fall back to an <a download>. */
-function exportFile(name, data, mime, textFallback) {
+function exportFile(name, data, mime, textFallback, fallbackMsg) {
   var blob = data instanceof Blob ? data : new Blob([data], { type: mime });
   var useClaude = typeof window.claude !== 'undefined' && window.claude && typeof window.claude.use === 'function';
   if (!useClaude) { anchorDownload(name, blob); return; }
@@ -585,7 +590,7 @@ function exportFile(name, data, mime, textFallback) {
       if (code === 'declined') return;
       if (code === 'rate_limited') { toast('A save prompt is already open — try again in a moment'); return; }
       if (textFallback != null) copyText(textFallback, 'Saving is unavailable here — ' + name.split('.').pop().toUpperCase() + ' copied to the clipboard instead');
-      else toast('Saving is unavailable here — use the SVG button instead');
+      else toast(fallbackMsg || 'Saving is unavailable here — use the SVG button instead');
     });
   }, function () { anchorDownload(name, blob); });
 }
@@ -880,7 +885,7 @@ divider.addEventListener('pointermove', function (e) {
 /* ---------------- code generation (Java / Python) ---------------- */
 var codeModal = $('codeModal'), codeLangTabs = $('codeLangTabs');
 var codeTemplateEditor = $('codeTemplateEditor'), codeOutput = $('codeOutput'), codeFileSelect = $('codeFileSelect');
-var codeNote = $('codeNote');
+var codeNote = $('codeNote'), codeProjectName = $('codeProjectName');
 var CODE_LANG_KEY = 'plantuml-studio.codegen.lang';
 var CODE_TPL_KEY_PREFIX = 'plantuml-studio.codegen.tpl.';
 var codeLang = 'java', codeFiles = [], codeGenTimer = null;
@@ -950,6 +955,16 @@ $('codeDownloadBtn').addEventListener('click', function () {
   if (!f) { toast('Nothing to export yet'); return; }
   exportFile(f.filename, f.code, 'text/plain', f.code);
 });
+$('codeDownloadZip').addEventListener('click', function () {
+  if (!lastResult || lastResult.type !== 'class' || !lastResult.model) { toast('Nothing to export yet'); return; }
+  try {
+    var proj = PUML.genProjectZip(lastResult.model, codeTemplateEditor.value, codeLang, codeProjectName.value);
+    exportFile(proj.zipName, proj.data, 'application/zip', null,
+      'ZIP downloads aren’t available in this preview — open the app at blog.mathieuacher.com/plantuml-studio to download the project.');
+  } catch (e) {
+    toast('Could not build the project: ' + (e && e.message ? e.message : e));
+  }
+});
 function setCodeLang(lang) {
   codeLang = lang;
   Array.prototype.forEach.call(codeLangTabs.querySelectorAll('button'), function (b) {
@@ -965,6 +980,9 @@ codeLangTabs.addEventListener('click', function (e) {
 });
 $('btnCode').addEventListener('click', function () {
   codeModal.classList.remove('hidden');
+  if (!codeProjectName.value && lastResult && lastResult.title) {
+    codeProjectName.value = String(lastResult.title).split('\n')[0];
+  }
   regenerateCode();
 });
 $('codeModalClose').addEventListener('click', function () { codeModal.classList.add('hidden'); });

@@ -35,23 +35,43 @@ declared element names. PlantUML keywords are case-insensitive throughout
 (`Object`/`OBJECT`/`object` all work), matching real PlantUML.
 
 **Graphical editing, bi-synchronized with the text** (class, object, use case and
-state diagrams): click a shape to select it and jump the editor to its
-declaration line; double-click its name to rename it — every reference updates,
-string labels don't; drag it to reposition it, saved as an ordinary
-`' @pos Name x,y` comment (invisible to real PlantUML, honored only by this
-editor's layout). The diagram stays a pure function of the text — dragging never
-creates a separate model, it rewrites the source and recompiles, the same way
-every other edit here works.
+state diagrams — the "Studio" render tab only, not "PlantUML β": see below):
+click a shape to select it and jump the editor to its declaration line;
+double-click its name to rename it everywhere it's referenced — class/object/state
+names are renamed as identifiers (word-boundary, string labels untouched), use
+case/actor free-text names (`(Borrow a book)`, `:Some Actor:`) are renamed as
+labels instead; drag it to reposition it, saved as an ordinary `' @pos Name x,y`
+comment (invisible to real PlantUML, honored only by this editor's layout). The
+diagram stays a pure function of the text — dragging never creates a separate
+model, it rewrites the source and recompiles, the same way every other edit here
+works. This is node-level editing (rename/move/navigate a class, object, use
+case, state, or note); editing an individual attribute or an association
+graphically — as opposed to selecting the class and editing its text — isn't
+implemented yet.
 
 **Code generation** (class diagrams → Java or Python, `Code` in the toolbar):
 inheritance and interface realization become `extends`/`implements`
 (Python: multiple inheritance + `ABC`/`@abstractmethod`), constructors chain to
-their superclass, a concrete class picks up stub overrides for any inherited
-interface/abstract method it doesn't itself declare, reserved words (`return`,
-`class`, …) are escaped automatically. The Java and Python templates are a
-small, editable Mustache-like text format (`{{name}}`, `{{#each attributes}}`,
+their superclass and thread inherited/associated fields through `super(...)`, a
+concrete class picks up stub overrides for any inherited interface/abstract
+method it doesn't itself declare, reserved words (`return`, `class`, …) are
+escaped automatically. **Associations** (composition `*--`, aggregation `o--`,
+directed `-->`, and plain `--`) become typed fields on the owning side —
+to-many multiplicities become `List<X>`/`List[X]` initialized empty in the
+constructor, not passed as an argument; dependency (`..>`) is skipped, since
+it's a "uses", not a "has-a". The Java and Python templates are a small,
+editable Mustache-like text format (`{{name}}`, `{{#each attributes}}`,
 `{{#if isAbstract}}`) — edit either one live in the modal; per-class output
-regenerates as you type, in either the template or the diagram.
+regenerates as you type, in either the template or the diagram. **Download
+project (.zip)** exports a complete, buildable project — `pom.xml` +
+`src/main/java/*.java` for Java (`mvn compile` works unmodified), or
+`pyproject.toml` + `.python-version` + flat `*.py` + `main.py` for Python, laid
+out exactly like `uv init` produces (`uv run main.py` works unmodified, offline,
+zero config). Both verified against the real toolchains (`javac`, `mvn compile`,
+`uv sync`/`uv run`, `python3 -c "import ast; ast.parse(...)"`), not just
+"looks right" — that caught several real bugs (reserved-word collisions, missing
+constructor chaining, `@abstractmethod` silently doing nothing without `ABC`,
+missing imports for both sibling classes and well-known JDK types like `Date`).
 
 ## Relationship to PlantUML
 
@@ -81,17 +101,18 @@ real engine and matched here.)
 ## Layout
 
 - `src/core/*.js` — pure, DOM-free engine: `pre.js` (preprocess, detection, arrow
-  grammar, SVG primitives, `@pos`/rename text-surgery helpers), `layout.js`
+  grammar, SVG primitives, `@pos`/rename/label text-surgery helpers), `layout.js`
   (layered graph layout with containers, cycle breaking, drag-position
   overrides), one parser+renderer per diagram family, `editor.js` (completion),
-  `codegen.js` (template engine + class-diagram → Java/Python generation),
+  `zip.js` (dependency-free ZIP writer, STORE method), `codegen.js` (template
+  engine + class-diagram → Java/Python generation + Maven/uv project scaffolding),
   `main.js` (`PUML.compile`, examples, syntax reference)
 - `src/app.js` / `src/style.css` / `src/shell.html` — editor UI (highlighting,
   gutter, problems panel, pan/zoom preview, click/drag/rename on the diagram,
   code-generation modal, exports, help modal, light/dark)
 - `tools/build-single.js` — builds `plantuml-studio.html` (standalone),
   `dist/artifact.html` (fragment for Claude Artifacts), `dist/puml-core.cjs` (tests)
-- `tests/test.js` — 407 assertions incl. seeded mutation fuzzing (must never throw)
+- `tests/test.js` — 455 assertions incl. seeded mutation fuzzing (must never throw)
 - `tests/conformance.html` + `tools/conformance.js` — cross-engine conformance harness
 - `vendor/` — unmodified official js-plantuml build (own licenses, see `vendor/README.md`)
 
