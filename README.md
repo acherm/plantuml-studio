@@ -73,6 +73,45 @@ zero config). Both verified against the real toolchains (`javac`, `mvn compile`,
 constructor chaining, `@abstractmethod` silently doing nothing without `ABC`,
 missing imports for both sibling classes and well-known JDK types like `Date`).
 
+### Where "List" comes from in the generated code
+
+Two independent mechanisms are involved, and only one of them is editable from
+the template pane in the UI — worth knowing before you go looking for `List`
+in the wrong place:
+
+- **The field's type** (`List<Media>` in Java, `List[Media]` in Python) is
+  decided in `src/core/codegen.js`, not the template, from two sources:
+  - **Hand-typed in the diagram** — e.g. `-books: List<Book>` — passed through
+    largely unchanged for Java; for Python, `toPyType()` (`codegen.js`,
+    `toPyType`) recognizes `List`/`ArrayList`/`LinkedList`/`Collection`
+    case-insensitively and maps to `List[...]` (same function also handles
+    `Set`/`Map`). This is the general Java→Python type mapper, also used for
+    method parameters and return types.
+  - **Derived from an association arrow** — a composition/aggregation/
+    directed/plain association whose far-end multiplicity is to-many (see
+    `isManyCard()`) becomes a collection field. The exact strings
+    `'List<' + targetName + '>'` and `'List[' + targetName + ']'` are built
+    directly in the assoc-field block inside `classGenModel()` (PASS 1.5) —
+    this does **not** go through `toPyType()`, since the target is always a
+    plain class name. This is the line to change if you want a different
+    collection type (e.g. `Set<X>`) for association-derived fields.
+
+  Either way, by the time the template runs, `{{type}}`/`{{pyType}}` are
+  already resolved strings — editing the template box cannot change *which*
+  collection type gets chosen, only how a given `{{type}}` is laid out on the
+  page.
+
+- **Whether the `List` *import* is emitted** is a separate decision:
+  `needsJavaCollections` (true if any instance attribute is a to-many
+  collection) and `needsTyping` (true if any attribute or method parameter's
+  `pyType` matches `List[`/`Set[`/`Dict[`) are booleans computed in JS and
+  handed to the template as flags. But the import line's actual **text** —
+  `import java.util.List;` / `from typing import List, Set, Dict` — is plain
+  text sitting inside `P.JAVA_TEMPLATE`/`P.PYTHON_TEMPLATE`, gated by
+  `{{#if needsJavaCollections}}`/`{{#if needsTyping}}`. That part genuinely
+  is template text: open the Code modal and edit those two lines directly to
+  change or add an import, no source edit required.
+
 ## Relationship to PlantUML
 
 This is **not** a PlantUML replacement — it is a validation-first teaching

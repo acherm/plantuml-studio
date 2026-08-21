@@ -2917,7 +2917,20 @@ P.makeZip = function (files) {
    text templates — no hidden magic) renders a per-class context built from
    the parsed class-diagram model. Ships default Java and Python templates;
    both the templates and the generation are exposed so a UI can let users
-   edit the template and regenerate live. */
+   edit the template and regenerate live.
+
+   NOT everything is template-editable, though — worth knowing before you go
+   looking for "List" in the wrong place:
+     - The DECISION that a field is a collection, and the literal type
+       STRING "List<X>" / "List[X]", are built in JS (toPyType() for
+       user-typed generics; the assoc-field block in classGenModel() for
+       to-many associations) and handed to the template already resolved as
+       {{type}}/{{pyType}}. Changing List to e.g. Set here means editing
+       this file, not the template.
+     - Whether an IMPORT line is emitted (needsJavaCollections / needsTyping)
+       is also decided in JS, but the import line's TEXT lives in the
+       template itself (P.JAVA_TEMPLATE / P.PYTHON_TEMPLATE below) — that
+       part genuinely is just template text, editable live in the UI. */
 'use strict';
 (function (P) {
 
@@ -3072,6 +3085,12 @@ var PY_TYPE_MAP = {
   double: 'float', float: 'float', boolean: 'bool', bool: 'bool',
   char: 'str', character: 'str', string: 'str', void: 'None', object: 'object'
 };
+/* Maps a Java-ish type STRING to its Python equivalent — this is the ONLY
+   place "List" is produced for a member the user typed by hand (e.g.
+   `-books: List<Book>` in the diagram); association-derived collection
+   fields build their pyType directly (see the assoc-field block below) and
+   never call this, since their target is always a plain class name, not a
+   generic that needs recursing into. */
 function toPyType(t) {
   t = String(t || '').trim();
   var g = /^([\w.]+)\s*<\s*(.+)\s*>$/.exec(t);
@@ -3258,6 +3277,13 @@ P.classGenModel = function (model) {
       /* a trailing/leading < or > in the label is just a PlantUML "read the
          label this way" rendering hint, not part of the text itself */
       var note = cand.label ? cand.label.replace(/\s*[<>]\s*$/, '').replace(/^\s*[<>]\s*/, '').trim() : null;
+      /* this is where "List" is decided for an association-derived field:
+         cand.many comes from isManyCard() reading the far-end multiplicity
+         (e.g. "0..*") — a to-many association always becomes a List here,
+         hardcoded, not read from the diagram or the template. To generate
+         Set<X>/List[X] differently, or a different collection type, this is
+         the line to change — the template only ever sees the resolved
+         {{type}}/{{pyType}} string below, it can't alter the choice. */
       assocAttrs.push({
         name: fieldName, pyName: '_' + pyParamName, pyParamName: pyParamName,
         visKw: 'private ', isStatic: false,
@@ -3374,6 +3400,10 @@ P.classGenModel = function (model) {
       implementsClause: info.ifaceNames.length ? ' implements ' + info.ifaceNames.join(', ') : '',
       pyBases: pyBases, pyBasesStr: pyBases.join(', '), hasPyBases: pyBases.length > 0,
       needsAbc: needsAbcHere,
+      /* needsTyping/needsJavaCollections only decide WHETHER an import
+         line fires — the import line's TEXT is plain text sitting in
+         P.JAVA_TEMPLATE / P.PYTHON_TEMPLATE below (search for "List" in
+         either), so THAT part is genuinely editable in the template pane */
       needsTyping: attributes.concat(methods.reduce(function (a, m) { return a.concat(m.params); }, []))
         .some(function (x) { return /^(List|Set|Dict)\[/.test(x.pyType); }),
       needsJavaCollections: instanceAttrs.some(function (a) { return a.isCollection; }),
@@ -3404,6 +3434,11 @@ P.JAVA_TEMPLATE = [
   '    {{enumValuesStr}}',
   '}',
   '{{else}}',
+  /* the two lines below are the ONLY place "List"/"ArrayList" appear as
+     literal, user-editable text — change them here to swap the collection
+     import (e.g. to java.util.Set) if you also change the type string in
+     classGenModel()'s assoc-field block; the {{type}} on a field further
+     down is already resolved by then and won't reflect an edit made here */
   '{{#if needsJavaCollections}}',
   'import java.util.ArrayList;',
   'import java.util.List;',
@@ -3463,6 +3498,9 @@ P.PYTHON_TEMPLATE = [
   '{{#if needsAbc}}',
   'from abc import ABC, abstractmethod',
   '{{/if}}',
+  /* same story as the Java ArrayList/List import above: editable text, but
+     the field types that make needsTyping true ("List[X]") are decided in
+     JS (toPyType() / classGenModel()'s assoc-field block), not here */
   '{{#if needsTyping}}',
   'from typing import List, Set, Dict',
   '{{/if}}',
